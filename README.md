@@ -21,27 +21,57 @@
 
 ---
 
-## 🚀 Installazione ed Esecuzione
+## 🚀 Installazione
 
-### Metodo 1: Installazione come comando globale `ngit`
-Dalla cartella del progetto:
-```bash
-pip install -e . --no-build-isolation --no-deps
-```
-Ora puoi digitare ovunque nel terminale:
-```bash
-ngit "il tuo comando in italiano"
+### 🪟 Su Windows
+
+#### Opzione A: Eseguibile Autonomo Standalone (Senza bisogno di Python!)
+In `dist/` trovi **`ngit.exe`** precompilato (12 MB):
+1. Copia `dist/ngit.exe` in una qualsiasi cartella nel tuo `PATH` (es. `C:\Windows\System32` o nella cartella dei tuoi tool).
+2. Apri il terminale e scrivi `ngit --help`!
+
+#### Opzione B: Installer 1-Click (`install.bat`)
+Fai doppio click su **`install.bat`**: installerà NaturalGit e aggiungerà automaticamente il comando al tuo `PATH` utente.
+
+#### Opzione C: Tramite Pip / Wheel
+```cmd
+pip install dist/naturalgit-1.0.0-py3-none-any.whl
 ```
 
-### Metodo 2: Esecuzione diretta
-Su Windows puoi usare direttamente lo script `.bat`:
-```cmd
-ngit.bat "mostrami lo stato dei file"
+---
+
+### 🐧 Su Linux (Ubuntu, Debian, Fedora, Arch, CentOS)
+
+#### Opzione A: Pacchetto Debian / Ubuntu (`.deb`)
+```bash
+sudo dpkg -i dist/naturalgit_1.0.0_all.deb
+# oppure
+sudo apt install ./dist/naturalgit_1.0.0_all.deb
 ```
-oppure con Python:
-```cmd
-python -m naturalgit.cli "mostrami lo stato dei file"
+Il comando `ngit` sarà subito disponibile globalmente in `/usr/bin/ngit`.
+
+#### Opzione B: Installer Automatico (`install.sh`)
+```bash
+chmod +x install.sh
+./install.sh
 ```
+
+#### Opzione C: Tramite Pip / Wheel
+```bash
+pip install dist/naturalgit-1.0.0-py3-none-any.whl --break-system-packages
+```
+
+---
+
+### 📁 Pacchetti Pronti nella cartella `dist/`
+
+| File | Piattaforma | Descrizione |
+|---|---|---|
+| **`ngit.exe`** | Windows x64 | Eseguibile autonomo standalone (funziona anche senza Python) |
+| **`naturalgit_1.0.0_all.deb`** | Debian / Ubuntu | Pacchetto `.deb` installabile con `dpkg -i` |
+| **`naturalgit-linux.tar.gz`** | Linux Universale | Archivio compresso contenente codice e `install.sh` |
+| **`naturalgit-1.0.0-py3-none-any.whl`** | Universale (Win/Linux/Mac) | Pacchetto Python Wheel standard |
+| **`naturalgit-1.0.0.tar.gz`** | Universale | Pacchetto sorgente standard (sdist) |
 
 ---
 
