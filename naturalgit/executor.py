@@ -1,11 +1,21 @@
 """
 Command executor with safety checks, confirmation, and interactive editing.
 """
+import os
 import shlex
 import subprocess
 import sys
+import re
 from typing import Optional
 from .ui import Colors, print_proposal, print_success, print_error, print_warning, print_info
+
+
+def sanitize_command_for_windows(cmd: str) -> str:
+    """Converts single quotes to double quotes on Windows to avoid cmd.exe parsing errors."""
+    if os.name != 'nt':
+        return cmd
+    # Replace single quotes with double quotes for flags and arguments
+    return re.sub(r"'([^']*)'", r'"\1"', cmd)
 
 
 def run_command_live(command_str: str) -> int:
@@ -13,10 +23,10 @@ def run_command_live(command_str: str) -> int:
     sub_commands = [c.strip() for c in command_str.split(" && ") if c.strip()]
     
     for cmd in sub_commands:
-        print(f"\n{Colors.DIM}▶ Esecuzione:{Colors.RESET} {Colors.BOLD}{cmd}{Colors.RESET}")
+        cmd_clean = sanitize_command_for_windows(cmd)
+        print(f"\n{Colors.DIM}▶ Esecuzione:{Colors.RESET} {Colors.BOLD}{cmd_clean}{Colors.RESET}")
         try:
-            # We run via subprocess with shell=True on Windows to support chained commands and pipes
-            ret = subprocess.call(cmd, shell=True)
+            ret = subprocess.call(cmd_clean, shell=True)
             if ret != 0:
                 print_error(f"Comando terminato con codice di errore: {ret}")
                 return ret
@@ -34,7 +44,8 @@ def execute_proposal(
     is_destructive: bool = False,
     auto_confirm: bool = False,
     dry_run: bool = False,
-    preview: str = ""
+    preview: str = "",
+    original_query: str = ""
 ) -> bool:
     """
     Displays the proposed command and asks the user for confirmation.
@@ -80,6 +91,19 @@ def execute_proposal(
                 code = run_command_live(new_cmd)
                 if code == 0:
                     print_success("Operazione completata!")
+                    if original_query:
+                        try:
+                            learn_prompt = f"\n{Colors.CYAN}💡 Vuoi memorizzare questo comando per la frase '{original_query}'? [S/n]: {Colors.RESET}"
+                            l_choice = input(learn_prompt).strip().lower()
+                            if l_choice in ["", "s", "si", "y", "yes"]:
+                                try:
+                                    from naturalgit.memory import get_memory
+                                except ImportError:
+                                    from .memory import get_memory
+                                get_memory().learn(original_query, new_cmd)
+                                print_success("Perfetto! Regola memorizzata per il futuro (risposta istantanea).")
+                        except Exception:
+                            pass
                     return True
                 return False
         except (KeyboardInterrupt, EOFError):

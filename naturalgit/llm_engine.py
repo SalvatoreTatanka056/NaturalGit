@@ -12,22 +12,15 @@ from typing import Any, Dict, Optional
 from .git_context import GitContext
 from .heuristic_engine import MatchResult
 
-SYSTEM_PROMPT = """Sei NaturalGit, un assistente esperto e infallibile per Git.
-Il tuo compito è convertire le richieste espresse in linguaggio naturale (italiano o inglese) nel comando Git esatto ed ottimale.
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
 
-REGOLE CRITICHE:
-1. Rispondi ESCLUSIVAMENTE con un oggetto JSON valido, senza formattazione markdown (niente ```json), senza testo prima o dopo.
-2. Il JSON deve avere esattamente questa struttura:
-{
-  "command": "comando git da eseguire (es: git commit -m \\"fix\\")",
-  "explanation": "Spiegazione breve e chiara in italiano di cosa fa il comando.",
-  "is_destructive": false,
-  "confidence": 0.95
-}
-3. Se l'operazione include più comandi, concatenali con " && " (es. "git add -A && git commit -m \\"...\\"").
-4. "is_destructive" deve essere TRUE per comandi che possono cancellare codice o sovrascrivere la storia (es: reset --hard, clean -fd, push --force, branch -D, checkout con perdita dati).
-5. Tieni conto del contesto corrente del repository fornito (branch, file modificati, staging).
-"""
+SYSTEM_PROMPT = """Traduttore Git rapido. Rispondi esclusivamente in formato JSON:
+{"command": "comando git da eseguire", "explanation": "breve spiegazione in italiano", "is_destructive": false}
+Concatena più comandi con &&. Imposta is_destructive=true se elimina dati, rami o riscrive la storia."""
 
 def query_ollama(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) -> Optional[MatchResult]:
     """Queries local Ollama endpoint."""
@@ -64,44 +57,65 @@ def query_ollama(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
 
 
 def query_gemini(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) -> Optional[MatchResult]:
-    """Queries Google Gemini API."""
+    """Queries Google Gemini API with ultra-low latency parameters."""
     api_key = config.get("gemini_api_key")
     if not api_key:
         return None
         
-    model = config.get("gemini_model", "gemini-1.5-flash")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    
-    context_str = json.dumps(ctx_data, ensure_ascii=False)
-    combined = f"{SYSTEM_PROMPT}\n\nContesto Git:\n{context_str}\n\nRichiesta utente: {prompt}"
+    requested_model = config.get("gemini_model", "gemini-flash-lite-latest")
+    fallback_models = ["gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
+    candidate_models = [requested_model] + [m for m in fallback_models if m != requested_model]
+
+    # Minimal context to drastically reduce TTFT (Time-To-First-Token)
+    branch = ctx_data.get("branch", "main")
+    staged = ctx_data.get("staged_count", 0)
+    user_req = f"{SYSTEM_PROMPT}\nBranch: {branch}, InStaging: {staged}\nRichiesta: {prompt}"
     
     payload = {
-        "contents": [{"parts": [{"text": combined}]}],
+        "contents": [{"parts": [{"text": user_req}]}],
         "generationConfig": {
-            "responseMimeType": "application/json"
+            "responseMimeType": "application/json",
+            "maxOutputTokens": 120,
+            "temperature": 0.1
         }
     }
-    
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-            raw_text = body["candidates"][0]["content"]["parts"][0]["text"].strip()
-            # Clean possible markdown wrapping if any
-            if raw_text.startswith("```"):
-                lines = raw_text.splitlines()
-                raw_text = "\n".join(lines[1:-1])
-            parsed = json.loads(raw_text)
-            return MatchResult(
-                command=parsed["command"],
-                explanation=parsed.get("explanation", ""),
-                is_destructive=parsed.get("is_destructive", False),
-                confidence=float(parsed.get("confidence", 0.95))
-            )
-    except Exception:
-        return None
+
+    for model in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        
+        try:
+            raw_text = ""
+            if HAS_REQUESTS:
+                resp = requests.post(url, json=payload, timeout=6)
+                if resp.status_code == 200:
+                    body = resp.json()
+                    raw_text = body["candidates"][0]["content"]["parts"][0]["text"].strip()
+                elif resp.status_code in [404, 503]:
+                    continue
+                else:
+                    return None
+            else:
+                data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=6) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    raw_text = body["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+            if raw_text:
+                if raw_text.startswith("```"):
+                    lines = raw_text.splitlines()
+                    raw_text = "\n".join(lines[1:-1])
+                parsed = json.loads(raw_text)
+                return MatchResult(
+                    command=parsed["command"],
+                    explanation=parsed.get("explanation", ""),
+                    is_destructive=parsed.get("is_destructive", False),
+                    confidence=float(parsed.get("confidence", 0.95))
+                )
+        except Exception:
+            continue
+
+    return None
 
 
 def query_openai(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) -> Optional[MatchResult]:

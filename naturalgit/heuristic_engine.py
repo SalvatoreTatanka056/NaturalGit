@@ -67,8 +67,31 @@ def match_heuristic(query: str, ctx: Optional[GitContext] = None) -> Optional[Ma
         return MatchResult(f"git clone {url}", f"Clona il repository remoto da '{url}'.")
 
     # --- 2. STATUS & INSPECTION ---
+    # Only names of modified files
+    if re.search(r'\b(nomi (dei )?file|solo (i )?nomi|elenco file modificati|mostra (i )?nomi (dei )?file|nomi dei file modificati)\b', low):
+        return MatchResult("git status -s", "Elenca in formato compatto i nomi e lo stato dei file modificati.")
+
+    # Untracked files
+    if re.search(r'\b(file non tracciati|quali file non sono tracciati|mostra non tracciati)\b', low):
+        return MatchResult("git ls-files --others --exclude-standard", "Elenca tutti i file non ancora tracciati da Git.")
+
+    # Status standard
     if re.search(r'\b(cosa ho (modificato|cambiato|toccato)|quali file sono (cambiati|modificati)|stato|status|situazione|mostra (lo )?stato)\b', low):
         return MatchResult("git status", "Mostra lo stato dell'albero di lavoro e dell'area di staging.")
+
+    # Search in commit history
+    search_commit = re.search(r'\b(cerca|trova)\b.*\bcommit\b.*\b(con|parola|messaggio|testo)\s+([\'"].+?[\'"]|\S+)', q, re.I)
+    if search_commit:
+        word = search_commit.group(3).strip('\'"')
+        return MatchResult(f'git log --grep="{word}" --oneline', f'Cerca tutti i commit che contengono la parola "{word}" nel messaggio.')
+
+    # Show last commit details
+    if re.search(r'\b(dettagli (dell\')?ultimo commit|cosa è cambiato nell\'ultimo commit|mostra ultimo commit|guarda ultimo commit)\b', low):
+        return MatchResult("git show", "Mostra l'autore, la data e le differenze complete introdotte nell'ultimo commit.")
+
+    # Authors ranking / stats
+    if re.search(r'\b(chi ha fatto più commit|classifica autori|statistiche commit|autori dei commit|quanti commit)\b', low):
+        return MatchResult("git shortlog -sn", "Mostra la classifica e il numero totale di commit per ciascun autore.")
 
     # Diff
     if re.search(r'\b(differenz[ae]|diff|cosa è cambiato|guarda le modifiche)\b', low):
@@ -82,7 +105,7 @@ def match_heuristic(query: str, ctx: Optional[GitContext] = None) -> Optional[Ma
         return MatchResult("git diff", "Mostra le differenze non ancora aggiunte all'area di staging.")
 
     # History & Logs
-    if re.search(r'\b(storia|cronologia|log|albero|grafic[oa]|ultimi\s+\d+\s+commit|mostra(mi)?\s+(i\s+)?commit)\b', low):
+    if re.search(r'\b(storia|cronologia|log|albero|grafic[oa]|ultim[ie]\s*(\d+)?\s*commit|mostra(mi)?\s+.*commit)\b', low):
         count_m = re.search(r'\b(ultimi|ultime|last)\s+(\d+)', low)
         count = count_m.group(2) if count_m else "10"
         if "albero" in low or "grafic" in low or "oneline" in low:
@@ -211,6 +234,19 @@ def match_heuristic(query: str, ctx: Optional[GitContext] = None) -> Optional[Ma
         if b_name.lower() not in ["tutto", "tutti", "nuovo", "branch"]:
             return MatchResult(f"git checkout {b_name}", f"Passa al branch '{b_name}'.")
 
+    # Rename branch
+    ren_match = re.search(r'\b(rinomina|cambia nome (del|al))\s+(?:branch\s+)?(?:in\s+)?([a-zA-Z0-9_\-\/]+)', q, re.I)
+    if ren_match:
+        new_name = ren_match.group(2)
+        return MatchResult(f"git branch -m {new_name}", f"Rinomina il branch corrente in '{new_name}'.")
+
+    # Compare branches
+    diff_branches = re.search(r'\b(confronta|differenze tra)\s+(?:branch\s+)?([a-zA-Z0-9_\-\/]+)\s+(?:con|e)\s+([a-zA-Z0-9_\-\/]+)', q, re.I)
+    if diff_branches:
+        b1 = diff_branches.group(2)
+        b2 = diff_branches.group(3)
+        return MatchResult(f"git diff {b1}..{b2}", f"Confronta le differenze tra il branch '{b1}' e il branch '{b2}'.")
+
     # Create new branch
     create_branch = re.search(r'\b(crea|nuovo|genera)\s+(?:un\s+)?(?:nuovo\s+)?branch\s+(?:chiamato\s+)?([a-zA-Z0-9_\-\/]+)', q, re.I)
     if create_branch:
@@ -240,6 +276,16 @@ def match_heuristic(query: str, ctx: Optional[GitContext] = None) -> Optional[Ma
         return MatchResult("git fetch --all", "Scarica tutti i riferimenti e branch dal server senza modificare i file locali.")
 
     # --- 7. STASH ---
+    # Stash with message
+    stash_msg = re.search(r'\b(stash|metti in stash|salva temporaneamente)\b.*\b(con messaggio|con nome|chiamato)\s+([\'"].+?[\'"]|\S+)', q, re.I)
+    if stash_msg:
+        s_text = stash_msg.group(3).strip('\'"')
+        return MatchResult(f'git stash push -m "{s_text}"', f'Salva le modifiche non committate in uno stash con etichetta "{s_text}".')
+
+    # Apply stash without dropping
+    if re.search(r'\b(applica( lo)? stash|applica senza cancellare)\b', low):
+        return MatchResult("git stash apply", "Riapplica le modifiche dell'ultimo stash mantenendolo conservato nello stash.")
+
     if re.search(r'\b(metti da parte|nascondi|salva temporaneamente|metti in stash|crea stash)\b', low):
         return MatchResult("git stash", "Mette al sicuro temporaneamente tutte le modifiche non committate nell'area di stash.")
 

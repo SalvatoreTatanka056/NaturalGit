@@ -21,6 +21,7 @@ try:
     from naturalgit.heuristic_engine import match_heuristic
     from naturalgit.llm_engine import query_llm
     from naturalgit.executor import execute_proposal
+    from naturalgit.memory import get_memory
 except ImportError:
     from .ui import (
         Colors, header, print_status, print_error, print_warning,
@@ -31,6 +32,7 @@ except ImportError:
     from .heuristic_engine import match_heuristic
     from .llm_engine import query_llm
     from .executor import execute_proposal
+    from .memory import get_memory
 
 
 def process_query(
@@ -40,12 +42,21 @@ def process_query(
     auto_confirm: bool = False,
     dry_run: bool = False
 ) -> bool:
-    """Processes a natural language query using heuristics and/or LLM."""
+    """
+    Multi-stage high-speed translation pipeline:
+    1. Direct Git commands (< 1ms)
+    2. Local Heuristic Engine (< 5ms)
+    3. User-Trained Rules / Few-Shot Learning (< 2ms)
+    4. Local AI Response Cache (< 2ms)
+    5. Remote / Local LLM (Gemini Flash / Ollama) -> automatically cached for future instant hits!
+    """
     query = query.strip()
     if not query:
         return False
 
-    # Check if this is already an explicit git command (e.g., user typed "git status" or "git checkout main")
+    memory = get_memory()
+
+    # 0. Check if already an explicit git command (e.g. "git status")
     if query.startswith("git "):
         return execute_proposal(
             command=query,
@@ -53,25 +64,55 @@ def process_query(
             engine_name="Comando diretto",
             is_destructive=False,
             auto_confirm=auto_confirm,
-            dry_run=dry_run
+            dry_run=dry_run,
+            original_query=query
         )
 
-    # 1. Try local heuristic pattern engine first (instant, works offline)
+    # 1. Local heuristic pattern engine (instant, offline)
     heuristic_res = match_heuristic(query, ctx)
     if heuristic_res:
         return execute_proposal(
             command=heuristic_res.command,
             explanation=heuristic_res.explanation,
-            engine_name="Regole locali",
+            engine_name="Regole locali (ultra-veloce)",
             is_destructive=heuristic_res.is_destructive,
             auto_confirm=auto_confirm,
             dry_run=dry_run,
-            preview=heuristic_res.preview
+            preview=heuristic_res.preview,
+            original_query=query
         )
 
-    # 2. If heuristics did not match, try LLM (Ollama, Gemini, OpenAI)
+    # 2. Check user-learned / custom-trained rules (< 2ms)
+    learned = memory.match_learned(query)
+    if learned:
+        return execute_proposal(
+            command=learned["command"],
+            explanation=learned["explanation"],
+            engine_name=learned["source"],
+            is_destructive=learned.get("is_destructive", False),
+            auto_confirm=auto_confirm,
+            dry_run=dry_run,
+            original_query=query
+        )
+
+    # 3. Check local AI response cache (< 2ms)
+    cached = memory.get_from_cache(query)
+    if cached:
+        return execute_proposal(
+            command=cached["command"],
+            explanation=cached["explanation"],
+            engine_name=cached["source"],
+            is_destructive=cached.get("is_destructive", False),
+            auto_confirm=auto_confirm,
+            dry_run=dry_run,
+            original_query=query
+        )
+
+    # 4. Query LLM (Gemini Flash-Lite / Ollama / OpenAI)
     llm_res = query_llm(query, ctx, config)
     if llm_res:
+        # Automatically cache this resolution so future queries are sub-millisecond!
+        memory.store_in_cache(query, llm_res.command, llm_res.explanation, llm_res.is_destructive)
         provider_name = config.get("provider", "LLM").upper()
         return execute_proposal(
             command=llm_res.command,
@@ -79,14 +120,14 @@ def process_query(
             engine_name=f"Intelligenza Artificiale ({provider_name})",
             is_destructive=llm_res.is_destructive,
             auto_confirm=auto_confirm,
-            dry_run=dry_run
+            dry_run=dry_run,
+            original_query=query
         )
 
-    # 3. If neither matched
+    # 5. Fallback if neither matched
     print_warning(f"Non sono riuscito a interpretare: '{query}'")
-    print_info("Suggerimento: prova a riformulare (es: 'crea branch test', 'aggiungi tutto e committa', 'mostra ultimi commit').")
-    if config.get("provider") == "heuristic" or (not config.get("gemini_api_key") and not config.get("openai_api_key")):
-        print(f" {Colors.DIM}Puoi configurare un LLM (Ollama, Gemini, OpenAI) con: ngit config --provider gemini --api-key <CHIAVE>{Colors.RESET}\n")
+    print_info("Suggerimento: prova a riformulare oppure insegna a NaturalGit questo comando con:")
+    print(f"  {Colors.BOLD}{Colors.CYAN}ngit learn \"{query}\" \"comando git esatto\"{Colors.RESET}\n")
     return False
 
 
@@ -129,6 +170,9 @@ def handle_config_command(args: argparse.Namespace, config: dict):
     if args.ollama_url:
         config["ollama_url"] = args.ollama_url
         modified = True
+    if args.auto_confirm is not None:
+        config["auto_confirm"] = args.auto_confirm.lower() in ["true", "1", "yes", "si"]
+        modified = True
 
     if modified:
         if save_config(config):
@@ -139,14 +183,76 @@ def handle_config_command(args: argparse.Namespace, config: dict):
         print_info("Usa 'ngit config --show' per visualizzare i parametri o '--help' per opzioni.")
 
 
+def handle_learn_command(args: List[str]):
+    """Handles teaching a new custom command: ngit learn <frase> <comando> [spiegazione]."""
+    if len(args) < 2:
+        print_error("Uso: ngit learn \"<frase in linguaggio naturale>\" \"<comando git da eseguire>\" [\"<spiegazione>\"]")
+        print_info("Esempio: ngit learn \"mostra i nomi dei file modificati\" \"git status -s\" \"Mostra solo i nomi dei file\"")
+        return
+
+    phrase = args[0]
+    command = args[1]
+    explanation = args[2] if len(args) > 2 else f"Comando appreso per: '{phrase}'"
+
+    memory = get_memory()
+    if memory.learn(phrase, command, explanation):
+        print_success(f"Regola appresa con successo!")
+        print(f"  {Colors.DIM}Frase:{Colors.RESET}   \"{phrase}\"")
+        print(f"  {Colors.DIM}Comando:{Colors.RESET} {Colors.GREEN}{command}{Colors.RESET}")
+        print(f"  {Colors.DIM}Effetto:{Colors.RESET} Ora risponderà istantaneamente (<2ms) senza passare per l'AI!\n")
+    else:
+        print_error("Errore durante il salvataggio della regola.")
+
+
+def handle_rules_command(argv: List[str]):
+    """Manages custom learned rules."""
+    memory = get_memory()
+    if "--delete" in argv:
+        idx = argv.index("--delete")
+        if idx + 1 < len(argv):
+            target = argv[idx + 1]
+            if memory.delete_learned(target):
+                print_success(f"Regola per '{target}' eliminata.")
+            else:
+                print_warning(f"Nessuna regola trovata per '{target}'.")
+            return
+        else:
+            print_error("Specifica la frase della regola da eliminare: ngit rules --delete \"<frase>\"")
+            return
+
+    rules = memory.list_learned()
+    if not rules:
+        print_info("Nessuna regola personalizzata salvata.")
+        print(f"  {Colors.DIM}Puoi insegnarne una con: ngit learn \"<frase>\" \"<comando>\"{Colors.RESET}\n")
+        return
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}--- Regole Personalizzate Apprese ({len(rules)}) ---{Colors.RESET}")
+    for i, r in enumerate(rules, 1):
+        print(f" {Colors.BOLD}{i}.{Colors.RESET} \"{r['phrase']}\" -> {Colors.GREEN}{r['command']}{Colors.RESET}")
+        if r.get("explanation"):
+            print(f"    {Colors.DIM}💡 {r['explanation']}{Colors.RESET}")
+    print()
+
+
+def handle_cache_command(argv: List[str]):
+    """Manages AI response cache."""
+    memory = get_memory()
+    if "--clear" in argv:
+        memory.clear_cache()
+        print_success("Cache locale delle risposte AI svuotata.")
+        return
+    count = len(memory.ai_cache)
+    print_info(f"Elementi memorizzati nella cache locale AI: {count}")
+    print(f"  {Colors.DIM}Usa 'ngit cache --clear' per svuotarla.{Colors.RESET}")
+
+
 def run_repl(ctx: GitContext, config: dict):
     """Runs interactive NaturalGit shell."""
     header()
     print(f"  {Colors.DIM}Modalità interattiva. Digita comandi in linguaggio naturale.{Colors.RESET}")
-    print(f"  {Colors.DIM}Digita '{Colors.WHITE}esci{Colors.DIM}' o '{Colors.WHITE}exit{Colors.DIM}' per uscire, '{Colors.WHITE}aiuto{Colors.DIM}' per esempi.{Colors.RESET}\n")
+    print(f"  {Colors.DIM}Digita '{Colors.WHITE}esci{Colors.DIM}' per uscire, '{Colors.WHITE}regole{Colors.DIM}' per vedere quelle apprese, '{Colors.WHITE}aiuto{Colors.DIM}' per esempi.{Colors.RESET}\n")
 
     while True:
-        # Refresh git context on each prompt
         ctx._refresh()
         branch_str = f"({ctx.branch})" if ctx.branch else "(no repo)"
         prompt_symbol = f"{Colors.BOLD}{Colors.BRIGHT_MAGENTA}ngit {branch_str}{Colors.RESET}> "
@@ -170,24 +276,25 @@ def run_repl(ctx: GitContext, config: dict):
             header()
             continue
 
+        if user_input.lower() == "regole":
+            handle_rules_command([])
+            continue
+
         if user_input.lower() in ["aiuto", "help"]:
             print(f"""
 {Colors.BOLD}Esempi di comandi che puoi digitare:{Colors.RESET}
-  - "mostrami lo stato dei file"
+  - "mostrami lo stato dei file" / "nomi dei file modificati"
   - "mostra cosa è cambiato"
   - "aggiungi tutto"
-  - "committa dicendo 'fix problema con login'"
-  - "committa tutto con messaggio 'aggiornamento generale'"
+  - "committa dicendo 'fix login'"
+  - "descrivi un commit con tutte le informazioni dei file e dell'utente"
   - "crea il branch feature/pagamenti e spostati lì"
-  - "elenca tutti i branch"
-  - "spostati su main"
   - "invia le modifiche al server" (push)
   - "scarica le novità" (pull)
   - "metti da parte le modifiche temporaneamente" (stash)
   - "recupera le modifiche messe da parte" (stash pop)
+  - "cerca nei commit la parola fix"
   - "mostra gli ultimi 5 commit ad albero"
-  - "annulla le modifiche al file main.py"
-  - "annulla l'ultimo commit tenendo i file"
 """)
             continue
 
@@ -202,20 +309,30 @@ def main(argv: Optional[List[str]] = None):
     config = load_config()
     ctx = GitContext()
 
-    # Check for config subcommand explicitly first
+    # Explicit subcommands
     if argv and argv[0] == "config":
-        config_parser = argparse.ArgumentParser(
-            prog="ngit config",
-            description="Configura NaturalGit (LLM, provider, chiavi)"
-        )
+        config_parser = argparse.ArgumentParser(prog="ngit config", description="Configura NaturalGit")
         config_parser.add_argument("--show", action="store_true", help="Mostra la configurazione corrente")
         config_parser.add_argument("--provider", choices=["auto", "ollama", "gemini", "openai", "heuristic"], help="Seleziona il provider")
-        config_parser.add_argument("--api-key", help="Imposta la chiave API per il provider selezionato")
-        config_parser.add_argument("--model", help="Imposta il modello (es: llama3, gemini-1.5-flash, gpt-4o-mini)")
-        config_parser.add_argument("--ollama-url", help="URL dell'endpoint Ollama (default: http://localhost:11434)")
-        config_parser.add_argument("--reset", action="store_true", help="Ripristina le impostazioni predefinite")
+        config_parser.add_argument("--api-key", help="Imposta la chiave API")
+        config_parser.add_argument("--model", help="Imposta il modello")
+        config_parser.add_argument("--ollama-url", help="URL di Ollama")
+        config_parser.add_argument("--auto-confirm", choices=["true", "false"], help="Attiva/disattiva esecuzione automatica senza prompt [true/false]")
+        config_parser.add_argument("--reset", action="store_true", help="Ripristina valori predefiniti")
         config_args = config_parser.parse_args(argv[1:])
         handle_config_command(config_args, config)
+        return
+
+    if argv and argv[0] == "learn":
+        handle_learn_command(argv[1:])
+        return
+
+    if argv and argv[0] == "rules":
+        handle_rules_command(argv[1:])
+        return
+
+    if argv and argv[0] == "cache":
+        handle_cache_command(argv[1:])
         return
 
     # Standard query parser
@@ -267,7 +384,8 @@ def main(argv: Optional[List[str]] = None):
     else:
         print_warning("Non ti trovi all'interno di un repository Git (puoi dire 'inizializza repo' per crearlo).")
     
-    process_query(query_text, ctx, config, auto_confirm=args.yes, dry_run=args.dry_run)
+    auto_exec = args.yes or config.get("auto_confirm", False)
+    process_query(query_text, ctx, config, auto_confirm=auto_exec, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

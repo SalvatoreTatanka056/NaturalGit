@@ -13,7 +13,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 DEFAULT_CONFIG: Dict[str, Any] = {
     "provider": "auto",           # auto, ollama, gemini, openai, heuristic
     "gemini_api_key": "",
-    "gemini_model": "gemini-1.5-flash",
+    "gemini_model": "gemini-flash-lite-latest",
     "openai_api_key": "",
     "openai_base_url": "https://api.openai.com/v1",
     "openai_model": "gpt-4o-mini",
