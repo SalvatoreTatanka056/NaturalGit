@@ -64,6 +64,10 @@ ngit "togli il file main.py dallo staging"
 ngit "committa dicendo 'fix problema di autenticazione'"
 ngit "committa tutto con messaggio 'primo rilascio'"
 ngit "modifica l'ultimo commit"
+
+# 🌟 NUOVO: Commit descrittivo con tutte le info di utente e file:
+ngit "descrivi un commit con tutte le informazioni dell'utente e dei file"
+ngit -dc "Titolo facoltativo del commit"
 ```
 
 ### 3. Gestione Branch
@@ -173,6 +177,7 @@ ngit config --show
 | Opzione | Descrizione |
 |---|---|
 | `<query>` | L'istruzione in linguaggio naturale (es. `ngit "fai il push"`) |
+| `-dc`, `--describe-commit` | Crea un commit descrittivo con tutti i metadati dell'utente e dei file |
 | `-y`, `--yes` | Esegue subito il comando senza chiedere conferma (salvo comandi distruttivi) |
 | `-d`, `--dry-run` | Mostra solo il comando proposto e la spiegazione senza eseguirlo |
 | `-i`, `--interactive` | Avvia la shell interattiva |
