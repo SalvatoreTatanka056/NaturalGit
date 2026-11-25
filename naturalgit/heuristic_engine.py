@@ -136,7 +136,10 @@ def match_heuristic(query: str, ctx: Optional[GitContext] = None) -> Optional[Ma
     if re.search(r'\b(descrivi|dettagliat[oa]|descrittiv[oa])\b.*\b(commit|committa)\b', low) or \
        re.search(r'\b(commit|committa)\b.*\b(con (tutte le )?info|con (tutte le )?informazion|dettagliat|descrittiv)\b', low) or \
        re.search(r'\b(descrivi\s+(un\s+|il\s+)?commit)\b', low):
-        from .describe_commit import generate_detailed_commit
+        try:
+            from naturalgit.describe_commit import generate_detailed_commit
+        except ImportError:
+            from .describe_commit import generate_detailed_commit
         title = extract_quotes(q) or extract_after_keyword(q, ["chiamato", "titolo", "con titolo", "dicendo"])
         if ctx and ctx.is_repo:
             cmd, expl, full_msg = generate_detailed_commit(ctx, title=title, add_all=True)

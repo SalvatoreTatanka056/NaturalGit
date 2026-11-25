@@ -1,7 +1,7 @@
 # 🌿 NaturalGit (ngit)
 
 > **Controlla Git parlando in linguaggio naturale (italiano o inglese).**  
-> Dimentica la sintassi complessa dei comandi Git: descrivi ciò che vuoi fare e NaturalGit lo trasformerà ed eseguirà per te in sicurezza.
+> Dimentica la sintassi complessa dei comandi Git: descrivi ciò che vuoi fare e NaturalGit lo trasformerà ed eseguirà per te in totale sicurezza.
 
 ---
 

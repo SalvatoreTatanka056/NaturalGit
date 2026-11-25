@@ -66,7 +66,7 @@ class GitContext:
                     continue
                 index_status = line[0]
                 worktree_status = line[1]
-                filename = line[3:].strip()
+                filename = line[2:].strip()
                 # Handle possible rename "old -> new"
                 if " -> " in filename:
                     filename = filename.split(" -> ")[1].strip()

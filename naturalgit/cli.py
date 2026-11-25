@@ -3,17 +3,34 @@ Main CLI Interface and Interactive REPL for NaturalGit.
 """
 import argparse
 import sys
+from pathlib import Path
 from typing import List, Optional
 
-from .ui import (
-    Colors, header, print_status, print_error, print_warning,
-    print_info, print_success
-)
-from .git_context import GitContext
-from .config import load_config, save_config, DEFAULT_CONFIG
-from .heuristic_engine import match_heuristic
-from .llm_engine import query_llm
-from .executor import execute_proposal
+# Ensure the root package folder is in sys.path for direct script invocation
+_root_dir = str(Path(__file__).resolve().parent.parent)
+if _root_dir not in sys.path:
+    sys.path.insert(0, _root_dir)
+
+try:
+    from naturalgit.ui import (
+        Colors, header, print_status, print_error, print_warning,
+        print_info, print_success
+    )
+    from naturalgit.git_context import GitContext
+    from naturalgit.config import load_config, save_config, DEFAULT_CONFIG
+    from naturalgit.heuristic_engine import match_heuristic
+    from naturalgit.llm_engine import query_llm
+    from naturalgit.executor import execute_proposal
+except ImportError:
+    from .ui import (
+        Colors, header, print_status, print_error, print_warning,
+        print_info, print_success
+    )
+    from .git_context import GitContext
+    from .config import load_config, save_config, DEFAULT_CONFIG
+    from .heuristic_engine import match_heuristic
+    from .llm_engine import query_llm
+    from .executor import execute_proposal
 
 
 def process_query(
@@ -217,7 +234,10 @@ def main(argv: Optional[List[str]] = None):
     args = parser.parse_args(argv)
 
     if args.describe_commit:
-        from .describe_commit import generate_detailed_commit
+        try:
+            from naturalgit.describe_commit import generate_detailed_commit
+        except ImportError:
+            from .describe_commit import generate_detailed_commit
         header()
         if not ctx.is_repo:
             print_error("Operazione non possibile: non ti trovi all'interno di un repository Git.")

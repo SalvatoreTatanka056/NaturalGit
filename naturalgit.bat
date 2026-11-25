@@ -1,2 +1,3 @@
 @echo off
-python "%~dp0naturalgit\cli.py" %*
+set PYTHONPATH=%~dp0;%PYTHONPATH%
+python -m naturalgit.cli %*
