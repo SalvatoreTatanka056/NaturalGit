@@ -54,7 +54,9 @@ def execute_proposal(
     print_proposal(command, explanation, engine_name=engine_name, is_destructive=is_destructive, preview=preview)
 
     if dry_run:
-        print_info("Modalità Dry-Run: nessun comando eseguito.")
+        print_info("Modalità Dry-Run attiva (richiesta dal parametro -d/--dry-run): nessun comando eseguito.")
+        cmd_hint = f'ngit "{original_query}"' if original_query else 'ngit ...'
+        print(f" {Colors.DIM}👉 Per eseguirlo realmente, rilancia il comando SENZA '-d': {Colors.RESET}{Colors.BOLD}{cmd_hint}{Colors.RESET}\n")
         return True
 
     if auto_confirm and not is_destructive:

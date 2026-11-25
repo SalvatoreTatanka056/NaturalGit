@@ -68,32 +68,82 @@ def process_query(
             original_query=query
         )
 
-    # 1. Local heuristic pattern engine (instant, offline)
-    heuristic_res = match_heuristic(query, ctx)
-    if heuristic_res:
-        return execute_proposal(
-            command=heuristic_res.command,
-            explanation=heuristic_res.explanation,
-            engine_name="Regole locali (ultra-veloce)",
-            is_destructive=heuristic_res.is_destructive,
-            auto_confirm=auto_confirm,
-            dry_run=dry_run,
-            preview=heuristic_res.preview,
-            original_query=query
-        )
+    provider = config.get("provider", "auto").lower()
+    has_gemini = bool(config.get("gemini_api_key"))
+    has_openai = bool(config.get("openai_api_key"))
+    has_ollama = bool(provider == "ollama")
 
-    # 2. Check user-learned / custom-trained rules (< 2ms)
-    learned = memory.match_learned(query)
-    if learned:
-        return execute_proposal(
-            command=learned["command"],
-            explanation=learned["explanation"],
-            engine_name=learned["source"],
-            is_destructive=learned.get("is_destructive", False),
-            auto_confirm=auto_confirm,
-            dry_run=dry_run,
-            original_query=query
-        )
+    # If user selected an AI provider (e.g. Gemini), AI IS THE PRIMARY AGENT for any sentence!
+    always_ai = (provider in ["gemini", "openai", "ollama"]) or (provider == "auto" and (has_gemini or has_openai))
+
+    if always_ai:
+        # Check cache (< 1ms) so repeated queries don't wait on network
+        cached = memory.get_from_cache(query)
+        if cached:
+            return execute_proposal(
+                command=cached["command"],
+                explanation=cached["explanation"],
+                engine_name=cached["source"],
+                is_destructive=cached.get("is_destructive", False),
+                auto_confirm=auto_confirm,
+                dry_run=dry_run,
+                original_query=query
+            )
+
+        # Primary: Run Gemini AI Agent!
+        llm_res = query_llm(query, ctx, config)
+        if llm_res:
+            memory.store_in_cache(query, llm_res.command, llm_res.explanation, llm_res.is_destructive)
+            agent_name = "Gemini Flash" if provider == "gemini" else provider.upper()
+            return execute_proposal(
+                command=llm_res.command,
+                explanation=llm_res.explanation,
+                engine_name=f"Agente AI ({agent_name})",
+                is_destructive=llm_res.is_destructive,
+                auto_confirm=auto_confirm,
+                dry_run=dry_run,
+                original_query=query
+            )
+
+        # Offline / Fallback: If AI is unreachable, use local heuristic engine
+        heuristic_res = match_heuristic(query, ctx)
+        if heuristic_res:
+            return execute_proposal(
+                command=heuristic_res.command,
+                explanation=heuristic_res.explanation,
+                engine_name="Regole locali (fallback offline)",
+                is_destructive=heuristic_res.is_destructive,
+                auto_confirm=auto_confirm,
+                dry_run=dry_run,
+                preview=heuristic_res.preview,
+                original_query=query
+            )
+    else:
+        # Standard heuristic first pipeline
+        heuristic_res = match_heuristic(query, ctx)
+        if heuristic_res:
+            return execute_proposal(
+                command=heuristic_res.command,
+                explanation=heuristic_res.explanation,
+                engine_name="Regole locali (ultra-veloce)",
+                is_destructive=heuristic_res.is_destructive,
+                auto_confirm=auto_confirm,
+                dry_run=dry_run,
+                preview=heuristic_res.preview,
+                original_query=query
+            )
+
+        learned = memory.match_learned(query)
+        if learned:
+            return execute_proposal(
+                command=learned["command"],
+                explanation=learned["explanation"],
+                engine_name=learned["source"],
+                is_destructive=learned.get("is_destructive", False),
+                auto_confirm=auto_confirm,
+                dry_run=dry_run,
+                original_query=query
+            )
 
     # 3. Check local AI response cache (< 2ms)
     cached = memory.get_from_cache(query)

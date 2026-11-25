@@ -156,6 +156,15 @@ class MemoryEngine:
     def list_learned(self) -> List[Dict[str, Any]]:
         return self.learned_rules
 
+    def get_few_shot_context(self, max_examples: int = 5) -> str:
+        """Returns formatted few-shot training examples to dynamically instruct the LLM."""
+        if not self.learned_rules:
+            return ""
+        lines = ["\nEsempi appresi dall'utente (usa come guida di stile per generalizzare su qualsiasi frase):"]
+        for r in self.learned_rules[-max_examples:]:
+            lines.append(f"- Frase: \"{r['phrase']}\" -> Comando: {r['command']}")
+        return "\n".join(lines)
+
     def delete_learned(self, phrase: str) -> bool:
         norm = normalize_text(phrase)
         orig_len = len(self.learned_rules)

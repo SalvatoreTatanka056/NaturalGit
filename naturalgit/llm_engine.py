@@ -69,7 +69,14 @@ def query_gemini(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
     # Minimal context to drastically reduce TTFT (Time-To-First-Token)
     branch = ctx_data.get("branch", "main")
     staged = ctx_data.get("staged_count", 0)
-    user_req = f"{SYSTEM_PROMPT}\nBranch: {branch}, InStaging: {staged}\nRichiesta: {prompt}"
+
+    try:
+        from naturalgit.memory import get_memory
+        few_shot = get_memory().get_few_shot_context(max_examples=5)
+    except Exception:
+        few_shot = ""
+
+    user_req = f"{SYSTEM_PROMPT}{few_shot}\nBranch: {branch}, InStaging: {staged}\nRichiesta: {prompt}"
     
     payload = {
         "contents": [{"parts": [{"text": user_req}]}],
@@ -86,7 +93,7 @@ def query_gemini(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
         try:
             raw_text = ""
             if HAS_REQUESTS:
-                resp = requests.post(url, json=payload, timeout=6)
+                resp = requests.post(url, json=payload, timeout=10)
                 if resp.status_code == 200:
                     body = resp.json()
                     raw_text = body["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -97,7 +104,7 @@ def query_gemini(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
             else:
                 data = json.dumps(payload).encode("utf-8")
                 req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=6) as resp:
+                with urllib.request.urlopen(req, timeout=10) as resp:
                     body = json.loads(resp.read().decode("utf-8"))
                     raw_text = body["candidates"][0]["content"]["parts"][0]["text"].strip()
 
