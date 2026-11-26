@@ -36,10 +36,12 @@ class AsmBinModel:
     Model loader and inference runtime for .asmbin format (Qwen3 / Transformer architecture).
     """
 
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str, threads: int = 4):
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model file not found: {model_path}")
 
+        self._threads = 4
+        self.set_threads(threads)
         self.path = model_path
         self._f = open(model_path, "rb")
         self._mm = mmap.mmap(self._f.fileno(), 0, access=mmap.ACCESS_READ)
@@ -100,6 +102,66 @@ class AsmBinModel:
             dtype=np.float32,
         )
         self._current_pos = 0
+
+    def set_threads(self, n: int):
+        """Sets the number of CPU worker threads for NumPy / BLAS / OpenMP."""
+        import ctypes
+        from pathlib import Path
+
+        n = max(1, int(n))
+        self._threads = n
+        n_str = str(n)
+
+        for var in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "BLIS_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+        ):
+            os.environ[var] = n_str
+
+        # Try threadpoolctl if installed
+        try:
+            import threadpoolctl
+            threadpoolctl.threadpool_limits(limits=n)
+        except Exception:
+            pass
+
+        # Directly configure loaded OpenBLAS / MKL shared libraries in numpy.libs / numpy/.libs
+        try:
+            np_root = Path(np.__file__).resolve().parent
+            lib_dirs = [
+                np_root.parent / "numpy.libs",
+                np_root / ".libs",
+                np_root.parent / "scipy_openblas64" / "lib",
+                np_root.parent / "scipy_openblas32" / "lib",
+            ]
+            for lib_dir in lib_dirs:
+                if not lib_dir.exists():
+                    continue
+                for lib_file in lib_dir.iterdir():
+                    if not (lib_file.suffix in (".dll", ".so", ".dylib") or ".so." in lib_file.name):
+                        continue
+                    fname = lib_file.name.lower()
+                    if "openblas" in fname or "blas" in fname or "mkl" in fname:
+                        try:
+                            dll = ctypes.CDLL(str(lib_file))
+                            for fn_name in (
+                                "scipy_openblas_set_num_threads64_",
+                                "scipy_openblas_set_num_threads",
+                                "openblas_set_num_threads",
+                                "MKL_Set_Num_Threads",
+                            ):
+                                fn = getattr(dll, fn_name, None)
+                                if fn is not None:
+                                    fn.argtypes = [ctypes.c_int]
+                                    fn(n)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
 
     def _load_tokenizer(self):
         """Loads BPE tokenizer data structures directly from mmap buffer."""

@@ -229,13 +229,20 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
         return None
 
     backend = config.get("local_backend", "auto")
-    threads = int(config.get("local_threads", 4))
+    threads = max(1, int(config.get("local_threads", 4)))
     max_tokens = int(config.get("local_max_tokens", 80))
+
+    # Set BLAS/OpenMP thread environment variables BEFORE llmasm/numpy initialization
+    for env_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "BLIS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ[env_var] = str(threads)
+
     try:
         from .ui import print_info
-        print_info("Elaborazione con motore locale llmasm in corso...")
+        print_info(f"Elaborazione con motore locale llmasm in corso (thread: {threads})...")
 
         model = load_model(model_path, backend=backend, threads=threads)
+        if hasattr(model, "set_threads"):
+            model.set_threads(threads)
         formatted_prompt = (
             "Sei un assistente Git. Traduci SEMPRE la richiesta dell'utente in un comando Git valido.\n"
             'Esempio: "elenca file" -> {"command": "git ls-files", "explanation": "Elenca file tracciati"}\n'

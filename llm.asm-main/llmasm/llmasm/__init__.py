@@ -53,4 +53,4 @@ def load_model(
             # If C engine is not yet compiled, gracefully fallback to NumPy
             pass
 
-    return AsmBinModel(model_path_str)
+    return AsmBinModel(model_path_str, threads=threads)
