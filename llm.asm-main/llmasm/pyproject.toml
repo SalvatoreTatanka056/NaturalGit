@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llmasm"
+version = "1.0.0"
+description = "Python library and high-performance C inference engine for llm.asm models (.asmbin)"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "Salvatore Romano", email = "tatanka056@gmail.com" }
+]
+dependencies = [
+    "numpy>=1.20.0",
+]
+
+[project.optional-dependencies]
+converter = [
+    "torch",
+    "safetensors",
+]
+
+[project.scripts]
+llmasm = "llmasm.cli:main"

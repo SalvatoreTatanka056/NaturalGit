@@ -230,6 +230,15 @@ def handle_config_command(args: argparse.Namespace, config: dict):
         else:
             config["openai_model"] = args.model
         modified = True
+    if getattr(args, "gemini_model", None):
+        config["gemini_model"] = args.gemini_model
+        modified = True
+    if getattr(args, "ollama_model", None):
+        config["ollama_model"] = args.ollama_model
+        modified = True
+    if getattr(args, "openai_model", None):
+        config["openai_model"] = args.openai_model
+        modified = True
     if args.ollama_url:
         config["ollama_url"] = args.ollama_url
         modified = True
@@ -378,11 +387,16 @@ def main(argv: Optional[List[str]] = None):
         config_parser.add_argument("--show", action="store_true", help="Mostra la configurazione corrente")
         config_parser.add_argument("--provider", choices=["auto", "ollama", "gemini", "openai", "heuristic"], help="Seleziona il provider")
         config_parser.add_argument("--api-key", help="Imposta la chiave API")
-        config_parser.add_argument("--model", help="Imposta il modello")
+        config_parser.add_argument("--model", help="Imposta il modello per il provider attivo")
+        config_parser.add_argument("--gemini-model", help="Imposta specificamente il modello Gemini (es: gemini-flash-lite-latest)")
+        config_parser.add_argument("--ollama-model", help="Imposta specificamente il modello Ollama (es: llama3, qwen2.5-coder:1.5b)")
+        config_parser.add_argument("--openai-model", help="Imposta specificamente il modello OpenAI (es: gpt-4o-mini)")
         config_parser.add_argument("--ollama-url", help="URL di Ollama")
         config_parser.add_argument("--auto-confirm", choices=["true", "false"], help="Attiva/disattiva esecuzione automatica senza prompt [true/false]")
         config_parser.add_argument("--reset", action="store_true", help="Ripristina valori predefiniti")
         config_args = config_parser.parse_args(argv[1:])
+        if not any(vars(config_args).values()):
+            config_args.show = True
         handle_config_command(config_args, config)
         return
 
