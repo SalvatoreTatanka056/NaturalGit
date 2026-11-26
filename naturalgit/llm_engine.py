@@ -177,13 +177,92 @@ def query_openai(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
         return None
 
 
-def query_llm(prompt: str, ctx: Optional[GitContext], config: Dict[str, Any]) -> Optional[MatchResult]:
+def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) -> Optional[MatchResult]:
+    """Queries local llmasm engine (.asmbin model executed via C/NumPy)."""
+    import os
+    import sys
+    from pathlib import Path
+
+    # Ensure llmasm is importable from project
+    llmasm_pkg_dir = Path(__file__).resolve().parent.parent / "llm.asm-main" / "llmasm"
+    if llmasm_pkg_dir.exists() and str(llmasm_pkg_dir) not in sys.path:
+        sys.path.insert(0, str(llmasm_pkg_dir))
+
+    try:
+        from llmasm import load_model
+    except ImportError:
+        return None
+
+    # Search for model path
+    model_path = config.get("local_model_path")
+    if not model_path or not os.path.exists(model_path):
+        candidates = [
+            Path.cwd() / "models" / "qwen3-0.6b-q8_0.asmbin",
+            Path(__file__).resolve().parent.parent / "llm.asm-main" / "models" / "qwen3-0.6b-q8_0.asmbin",
+            Path.home() / ".naturalgit" / "models" / "qwen3-0.6b-q8_0.asmbin",
+        ]
+        # Also check any .asmbin in current directory models/
+        if (Path.cwd() / "models").exists():
+            for f in (Path.cwd() / "models").glob("*.asmbin"):
+                candidates.insert(0, f)
+        for cand in candidates:
+            if cand.exists():
+                model_path = str(cand)
+                break
+
+    if not model_path or not os.path.exists(model_path):
+        return None
+
+    backend = config.get("local_backend", "auto")
+    try:
+        model = load_model(model_path, backend=backend)
+        branch = ctx_data.get("branch", "main")
+        staged = ctx_data.get("staged_count", 0)
+        formatted_prompt = f"{SYSTEM_PROMPT}\nBranch: {branch}, InStaging: {staged}\nRichiesta: {prompt}\nJSON:"
+        
+        raw_text = model.generate(formatted_prompt, max_tokens=100, temperature=0.1)
+        if hasattr(raw_text, "text"):
+            raw_text = raw_text.text
+        raw_text = str(raw_text).strip()
+
+        # Parse JSON output
+        import re
+        json_match = re.search(r"\{.*?\}", raw_text, re.DOTALL)
+        if json_match:
+            parsed = json.loads(json_match.group(0))
+            return MatchResult(
+                command=parsed["command"],
+                explanation=parsed.get("explanation", f"Eseguito con motore locale llmasm ({backend})"),
+                is_destructive=parsed.get("is_destructive", False),
+                confidence=0.92
+            )
+        elif raw_text.startswith("git "):
+            return MatchResult(
+                command=raw_text.splitlines()[0],
+                explanation=f"Comando generato dal motore locale llmasm ({backend})",
+                is_destructive=False,
+                confidence=0.85
+            )
+    except Exception:
+        return None
+    return None
+
+
+def query_llm(prompt: str, ctx: Optional[GitContext], config: Dict[str, Any], force_local: bool = False) -> Optional[MatchResult]:
     """
     Attempts to translate natural language using configured LLM.
     Returns MatchResult or None if no LLM succeeded.
     """
-    provider = config.get("provider", "auto").lower()
+    provider = "local" if force_local else config.get("provider", "auto").lower()
     ctx_data = ctx.to_dict() if ctx else {}
+
+    # 0. Local llmasm (.asmbin / C engine)
+    if provider in ["local", "llmasm"]:
+        res = query_llmasm(prompt, ctx_data, config)
+        if res:
+            return res
+        if provider in ["local", "llmasm"]:
+            return None
     
     # 1. Explicit or auto Ollama
     if provider in ["ollama", "auto"]:

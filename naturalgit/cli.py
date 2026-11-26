@@ -53,15 +53,17 @@ def process_query(
     ctx: GitContext,
     config: dict,
     auto_confirm: bool = False,
-    dry_run: bool = False
+    dry_run: bool = False,
+    use_local: bool = False
 ) -> bool:
     """
     Multi-stage high-speed translation pipeline:
     1. Direct Git commands (< 1ms)
-    2. Local Heuristic Engine (< 5ms)
-    3. User-Trained Rules / Few-Shot Learning (< 2ms)
-    4. Local AI Response Cache (< 2ms)
-    5. Remote / Local LLM (Gemini Flash / Ollama) -> automatically cached for future instant hits!
+    2. Local llmasm C/Assembly Engine (if --local or provider=local)
+    3. Local Heuristic Engine (< 5ms)
+    4. User-Trained Rules / Few-Shot Learning (< 2ms)
+    5. Local AI Response Cache (< 2ms)
+    6. Remote / Local LLM (Gemini Flash / Ollama) -> automatically cached for future instant hits!
     """
     query = query.strip()
     if not query:
@@ -80,6 +82,27 @@ def process_query(
             dry_run=dry_run,
             original_query=query
         )
+
+    provider = config.get("provider", "auto").lower()
+
+    # 1. Check if user requested local llmasm model (--local or provider=local)
+    if use_local or provider in ["local", "llmasm"]:
+        llm_res = query_llm(query, ctx, config, force_local=True)
+        if llm_res:
+            backend_name = config.get("local_backend", "auto").upper()
+            return execute_proposal(
+                command=llm_res.command,
+                explanation=llm_res.explanation,
+                engine_name=f"Motore Locale llmasm ({backend_name})",
+                is_destructive=llm_res.is_destructive,
+                auto_confirm=auto_confirm,
+                dry_run=dry_run,
+                original_query=query
+            )
+        else:
+            print_warning("Nessun modello .asmbin trovato o errore di esecuzione con llmasm.")
+            print_info("Suggerimento: specifica il percorso del modello con 'ngit config --local-model <percorso.asmbin>'")
+            print_info("Continuo con i provider configurati...\n")
 
     provider = config.get("provider", "auto").lower()
     has_gemini = bool(config.get("gemini_api_key"))
@@ -239,6 +262,12 @@ def handle_config_command(args: argparse.Namespace, config: dict):
     if getattr(args, "openai_model", None):
         config["openai_model"] = args.openai_model
         modified = True
+    if getattr(args, "local_model", None):
+        config["local_model_path"] = args.local_model
+        modified = True
+    if getattr(args, "local_backend", None):
+        config["local_backend"] = args.local_backend
+        modified = True
     if args.ollama_url:
         config["ollama_url"] = args.ollama_url
         modified = True
@@ -385,12 +414,14 @@ def main(argv: Optional[List[str]] = None):
     if argv and argv[0] == "config":
         config_parser = argparse.ArgumentParser(prog="ngit config", description="Configura NaturalGit")
         config_parser.add_argument("--show", action="store_true", help="Mostra la configurazione corrente")
-        config_parser.add_argument("--provider", choices=["auto", "ollama", "gemini", "openai", "heuristic"], help="Seleziona il provider")
+        config_parser.add_argument("--provider", choices=["auto", "ollama", "gemini", "openai", "heuristic", "local", "llmasm"], help="Seleziona il provider")
         config_parser.add_argument("--api-key", help="Imposta la chiave API")
         config_parser.add_argument("--model", help="Imposta il modello per il provider attivo")
         config_parser.add_argument("--gemini-model", help="Imposta specificamente il modello Gemini (es: gemini-flash-lite-latest)")
         config_parser.add_argument("--ollama-model", help="Imposta specificamente il modello Ollama (es: llama3, qwen2.5-coder:1.5b)")
         config_parser.add_argument("--openai-model", help="Imposta specificamente il modello OpenAI (es: gpt-4o-mini)")
+        config_parser.add_argument("--local-model", help="Imposta il percorso del modello .asmbin per il motore locale llmasm")
+        config_parser.add_argument("--local-backend", choices=["auto", "c", "numpy"], help="Imposta il backend per llmasm (auto, c o numpy)")
         config_parser.add_argument("--ollama-url", help="URL di Ollama")
         config_parser.add_argument("--auto-confirm", choices=["true", "false"], help="Attiva/disattiva esecuzione automatica senza prompt [true/false]")
         config_parser.add_argument("--reset", action="store_true", help="Ripristina valori predefiniti")
@@ -420,6 +451,7 @@ def main(argv: Optional[List[str]] = None):
     )
 
     parser.add_argument("query", nargs="*", help="Istruzione in linguaggio naturale (in italiano o inglese).")
+    parser.add_argument("-l", "--local", action="store_true", help="Usa il motore locale llmasm (.asmbin / C engine) per l'inferenza.")
     parser.add_argument("-dc", "--describe-commit", action="store_true", help="Crea un commit descrittivo con tutti i metadati dell'utente e dei file.")
     parser.add_argument("-y", "--yes", action="store_true", help="Esegui automaticamente senza chiedere conferma.")
     parser.add_argument("-d", "--dry-run", action="store_true", help="Mostra il comando identificato senza eseguirlo.")
@@ -462,7 +494,7 @@ def main(argv: Optional[List[str]] = None):
         print_warning("Non ti trovi all'interno di un repository Git (puoi dire 'inizializza repo' per crearlo).")
     
     auto_exec = args.yes or config.get("auto_confirm", False)
-    process_query(query_text, ctx, config, auto_confirm=auto_exec, dry_run=args.dry_run)
+    process_query(query_text, ctx, config, auto_confirm=auto_exec, dry_run=args.dry_run, use_local=args.local)
 
 
 if __name__ == "__main__":

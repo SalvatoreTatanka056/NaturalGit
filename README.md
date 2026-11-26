@@ -118,6 +118,19 @@ Se vuoi solo vedere quale comando verrebbe eseguito **senza toccare nulla**:
 ngit -d "elimina forzatamente il branch dev"
 ```
 
+### 5. Utilizzo del Motore Locale C/Assembly (`-l` o `--local`)
+Se vuoi eseguire l'inferenza **100% offline** tramite la libreria nativa `llmasm` (.asmbin / C AVX2 engine):
+```cmd
+ngit -l "mostra i branch remoti"
+```
+Se il flag `-l` / `--local` non viene passato, NaturalGit utilizza come sempre il provider e modello configurati (Gemini Flash, Ollama, OpenAI o euristiche).
+
+Per configurare il modello locale:
+```cmd
+ngit config --local-model C:\percorso\modello.asmbin
+ngit config --local-backend c  # oppure "auto" o "numpy"
+```
+
 ---
 
 ## 🤖 Addestramento e Memoria Personalizzata
