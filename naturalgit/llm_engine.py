@@ -214,8 +214,9 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
         return None
 
     backend = config.get("local_backend", "auto")
+    threads = int(config.get("local_threads", 4))
     try:
-        model = load_model(model_path, backend=backend)
+        model = load_model(model_path, backend=backend, threads=threads)
         branch = ctx_data.get("branch", "main")
         staged = ctx_data.get("staged_count", 0)
         formatted_prompt = f"{SYSTEM_PROMPT}\nBranch: {branch}, InStaging: {staged}\nRichiesta: {prompt}\nJSON:"

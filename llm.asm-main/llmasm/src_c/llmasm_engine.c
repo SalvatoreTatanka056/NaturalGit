@@ -117,6 +117,7 @@ struct LLMModel {
     float* act_mlp_up;
     float* act_mlp_down;
     float* logits;
+    int n_threads;
 };
 
 static void init_q8_matrix(Q8Matrix* m, const uint8_t* raw, int rows, int cols, int is_fp16) {
@@ -129,13 +130,16 @@ static void init_q8_matrix(Q8Matrix* m, const uint8_t* raw, int rows, int cols, 
 }
 
 /* High-performance Q8_0 Matrix-Vector Multiply */
-static void matvec_q8(const Q8Matrix* m, const float* x, float* out) {
+static void matvec_q8(const Q8Matrix* m, const float* x, float* out, int n_threads) {
     const int rows = m->rows;
     const int cols = m->cols;
     const int nb = cols / 32;
     const int is_fp16 = m->is_fp16;
     const int row_stride = m->row_stride;
 
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(static) if(n_threads > 1) num_threads(n_threads)
+#endif
     for (int r = 0; r < rows; r++) {
         const uint8_t* row_base = m->raw + (size_t)r * row_stride;
         const int8_t* w_row = (const int8_t*)row_base;
@@ -344,6 +348,7 @@ LLMModel* llmasm_load_model(const char* file_path) {
     m->act_mlp_up = (float*)calloc(m->hdr.hidden_dim, sizeof(float));
     m->act_mlp_down = (float*)calloc(m->hdr.dim, sizeof(float));
     m->logits = (float*)calloc(m->hdr.vocab_size, sizeof(float));
+    m->n_threads = 4;
 
     return m;
 }
@@ -378,6 +383,11 @@ void llmasm_reset_cache(LLMModel* model) {
     memset(model->k_cache, 0, kv_size * sizeof(float));
     memset(model->v_cache, 0, kv_size * sizeof(float));
     model->current_pos = 0;
+}
+
+void llmasm_set_threads(LLMModel* model, int n_threads) {
+    if (!model) return;
+    model->n_threads = (n_threads > 0) ? n_threads : 1;
 }
 
 /* ============================================================================
@@ -509,9 +519,9 @@ int llmasm_forward_token(LLMModel* m, int token_id, int pos, int compute_logits)
         rmsnorm(m->act_x, L->in_norm, dim, m->hdr.rms_norm_eps, m->act_norm);
 
         /* Q, K, V projections */
-        matvec_q8(&L->q_proj, m->act_norm, m->act_q);
-        matvec_q8(&L->k_proj, m->act_norm, m->act_k);
-        matvec_q8(&L->v_proj, m->act_norm, m->act_v);
+        matvec_q8(&L->q_proj, m->act_norm, m->act_q, m->n_threads);
+        matvec_q8(&L->k_proj, m->act_norm, m->act_k, m->n_threads);
+        matvec_q8(&L->v_proj, m->act_norm, m->act_v, m->n_threads);
 
         /* QK-Norm */
         for (int h = 0; h < n_heads; h++) {
@@ -593,17 +603,17 @@ int llmasm_forward_token(LLMModel* m, int token_id, int pos, int compute_logits)
         }
 
         /* O projection & residual */
-        matvec_q8(&L->o_proj, m->act_attn_out, m->act_norm);
+        matvec_q8(&L->o_proj, m->act_attn_out, m->act_norm, m->n_threads);
         for (int i = 0; i < dim; i++) {
             m->act_x[i] += m->act_norm[i];
         }
 
         /* MLP / SwiGLU */
         rmsnorm(m->act_x, L->post_norm, dim, m->hdr.rms_norm_eps, m->act_norm);
-        matvec_q8(&L->gate_proj, m->act_norm, m->act_mlp_gate);
-        matvec_q8(&L->up_proj, m->act_norm, m->act_mlp_up);
+        matvec_q8(&L->gate_proj, m->act_norm, m->act_mlp_gate, m->n_threads);
+        matvec_q8(&L->up_proj, m->act_norm, m->act_mlp_up, m->n_threads);
         silu_mul(m->act_mlp_gate, m->act_mlp_up, m->hdr.hidden_dim, m->act_mlp_gate);
-        matvec_q8(&L->down_proj, m->act_mlp_gate, m->act_mlp_down);
+        matvec_q8(&L->down_proj, m->act_mlp_gate, m->act_mlp_down, m->n_threads);
         for (int i = 0; i < dim; i++) {
             m->act_x[i] += m->act_mlp_down[i];
         }
@@ -613,7 +623,7 @@ int llmasm_forward_token(LLMModel* m, int token_id, int pos, int compute_logits)
 
     /* Final RMSNorm and tied LM head */
     rmsnorm(m->act_x, m->final_norm, dim, m->hdr.rms_norm_eps, m->act_norm);
-    matvec_q8(&m->emb, m->act_norm, m->logits);
+    matvec_q8(&m->emb, m->act_norm, m->logits, m->n_threads);
     return 0;
 }
 

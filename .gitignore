@@ -7,3 +7,10 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+*.asmbin
+models/
+*.dll
+*.so
+*.dylib
+*.a
+*.o

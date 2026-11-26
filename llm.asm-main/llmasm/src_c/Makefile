@@ -1,7 +1,7 @@
 # Makefile for compiling libllmasm shared library (C inference engine)
 
 CC ?= gcc
-CFLAGS ?= -O3 -fPIC -Wall -Wextra
+CFLAGS ?= -O3 -fPIC -Wall -Wextra -fopenmp
 SIMD_FLAGS ?= -mavx2 -mfma -mf16c
 
 # Target name based on OS

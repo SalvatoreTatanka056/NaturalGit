@@ -87,6 +87,10 @@ class CLibBinding:
         self.cdll.llmasm_reset_cache.argtypes = [c_void_p]
         self.cdll.llmasm_reset_cache.restype = None
 
+        # void llmasm_set_threads(LLMModel* model, int n_threads);
+        self.cdll.llmasm_set_threads.argtypes = [c_void_p, c_int]
+        self.cdll.llmasm_set_threads.restype = None
+
         # int llmasm_encode_bpe(const LLMModel* model, const char* text, int* out_tokens, int max_tokens);
         self.cdll.llmasm_encode_bpe.argtypes = [c_void_p, c_char_p, POINTER(c_int), c_int]
         self.cdll.llmasm_encode_bpe.restype = c_int
@@ -130,7 +134,7 @@ class CAsmBinModel:
     High-level Python wrapper executing directly via compiled C inference engine.
     """
 
-    def __init__(self, model_path: str, lib_path: Optional[Union[str, Path]] = None):
+    def __init__(self, model_path: str, lib_path: Optional[Union[str, Path]] = None, threads: int = 4):
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model file not found: {model_path}")
 
@@ -143,6 +147,13 @@ class CAsmBinModel:
 
         header_ptr = self._binding.cdll.llmasm_get_header(self._handle)
         self.hdr = header_ptr.contents
+        self.set_threads(threads)
+
+    def set_threads(self, n: int):
+        """Sets the number of CPU worker threads."""
+        self._threads = max(1, int(n))
+        if getattr(self, "_handle", None):
+            self._binding.cdll.llmasm_set_threads(self._handle, self._threads)
 
     def close(self):
         """Frees model in C memory."""

@@ -21,6 +21,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ollama_model": "llama3",
     "local_model_path": "",       # Path to .asmbin model file for llmasm
     "local_backend": "auto",      # auto, c, numpy
+    "local_threads": 4,           # Number of CPU worker threads
     "auto_confirm": False,
     "language": "it"
 }

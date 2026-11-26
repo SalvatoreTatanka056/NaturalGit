@@ -12,8 +12,9 @@ from . import __version__, build_c_library, export_to_asmbin, find_compiled_lib,
 
 def handle_run(args):
     """Executes a single prompt."""
-    print(f"Loading model '{args.model}' (backend: {args.backend})...")
-    model = load_model(args.model, backend=args.backend)
+    threads = getattr(args, "threads", 4)
+    print(f"Loading model '{args.model}' (backend: {args.backend}, threads: {threads})...")
+    model = load_model(args.model, backend=args.backend, threads=threads)
     info = model.info
     print(f"Loaded: dim={info['dim']} layers={info['n_layers']} heads={info['n_heads']}")
     print(f"\n--- Output ---")
@@ -34,8 +35,9 @@ def handle_run(args):
 
 def handle_chat(args):
     """Starts interactive chat session."""
-    print(f"Loading model '{args.model}' for chat...")
-    model = load_model(args.model, backend=args.backend)
+    threads = getattr(args, "threads", 4)
+    print(f"Loading model '{args.model}' for chat (threads: {threads})...")
+    model = load_model(args.model, backend=args.backend, threads=threads)
     print("Interactive Chat Session. Type 'exit' or 'quit' to quit.\n")
 
     while True:
@@ -107,6 +109,7 @@ def main(argv=None):
     p_run.add_argument("-p", "--prompt", required=True, help="Prompt text")
     p_run.add_argument("-n", "--max-tokens", type=int, default=64, help="Max tokens to generate")
     p_run.add_argument("-t", "--temp", type=float, default=0.0, help="Sampling temperature")
+    p_run.add_argument("-j", "--threads", type=int, default=4, help="Numero di thread CPU per l'inferenza (default 4)")
     p_run.add_argument("--backend", choices=["auto", "c", "numpy"], default="auto", help="Inference backend")
     p_run.add_argument("--no-stream", dest="stream", action="store_false", help="Disable streaming output")
 
@@ -115,6 +118,7 @@ def main(argv=None):
     p_chat.add_argument("-m", "--model", required=True, help="Path to .asmbin model file")
     p_chat.add_argument("-n", "--max-tokens", type=int, default=128, help="Max tokens per response")
     p_chat.add_argument("-t", "--temp", type=float, default=0.0, help="Sampling temperature")
+    p_chat.add_argument("-j", "--threads", type=int, default=4, help="Numero di thread CPU per l'inferenza (default 4)")
     p_chat.add_argument("--backend", choices=["auto", "c", "numpy"], default="auto", help="Inference backend")
 
     # Convert

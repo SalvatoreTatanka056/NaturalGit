@@ -96,6 +96,11 @@ LLMASM_API const AsmBinHeader* llmasm_get_header(const LLMModel* model);
 LLMASM_API void llmasm_reset_cache(LLMModel* model);
 
 /**
+ * Sets the number of CPU worker threads (OpenMP/multithreading).
+ */
+LLMASM_API void llmasm_set_threads(LLMModel* model, int n_threads);
+
+/**
  * Encodes text into token IDs using BPE Fibonacci hash table.
  * Returns the number of tokens written into out_tokens.
  */

@@ -268,6 +268,9 @@ def handle_config_command(args: argparse.Namespace, config: dict):
     if getattr(args, "local_backend", None):
         config["local_backend"] = args.local_backend
         modified = True
+    if getattr(args, "local_threads", None):
+        config["local_threads"] = args.local_threads
+        modified = True
     if args.ollama_url:
         config["ollama_url"] = args.ollama_url
         modified = True
@@ -422,6 +425,7 @@ def main(argv: Optional[List[str]] = None):
         config_parser.add_argument("--openai-model", help="Imposta specificamente il modello OpenAI (es: gpt-4o-mini)")
         config_parser.add_argument("--local-model", help="Imposta il percorso del modello .asmbin per il motore locale llmasm")
         config_parser.add_argument("--local-backend", choices=["auto", "c", "numpy"], help="Imposta il backend per llmasm (auto, c o numpy)")
+        config_parser.add_argument("--local-threads", type=int, help="Imposta il numero di thread CPU per il motore locale llmasm")
         config_parser.add_argument("--ollama-url", help="URL di Ollama")
         config_parser.add_argument("--auto-confirm", choices=["true", "false"], help="Attiva/disattiva esecuzione automatica senza prompt [true/false]")
         config_parser.add_argument("--reset", action="store_true", help="Ripristina valori predefiniti")
@@ -452,6 +456,7 @@ def main(argv: Optional[List[str]] = None):
 
     parser.add_argument("query", nargs="*", help="Istruzione in linguaggio naturale (in italiano o inglese).")
     parser.add_argument("-l", "--local", action="store_true", help="Usa il motore locale llmasm (.asmbin / C engine) per l'inferenza.")
+    parser.add_argument("-j", "--threads", type=int, default=None, help="Numero di thread CPU per l'inferenza locale (default da config)")
     parser.add_argument("-dc", "--describe-commit", action="store_true", help="Crea un commit descrittivo con tutti i metadati dell'utente e dei file.")
     parser.add_argument("-y", "--yes", action="store_true", help="Esegui automaticamente senza chiedere conferma.")
     parser.add_argument("-d", "--dry-run", action="store_true", help="Mostra il comando identificato senza eseguirlo.")
@@ -493,6 +498,9 @@ def main(argv: Optional[List[str]] = None):
     else:
         print_warning("Non ti trovi all'interno di un repository Git (puoi dire 'inizializza repo' per crearlo).")
     
+    if args.threads is not None:
+        config["local_threads"] = args.threads
+
     auto_exec = args.yes or config.get("auto_confirm", False)
     process_query(query_text, ctx, config, auto_confirm=auto_exec, dry_run=args.dry_run, use_local=args.local)
 
