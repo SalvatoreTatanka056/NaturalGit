@@ -203,10 +203,57 @@ class AsmBinModel:
             s = np.ascontiguousarray(raw[:, cols:]).view("<f4").reshape(rows, nb)
         return q, s
 
+    @staticmethod
+    def _get_available_ram_bytes() -> int:
+        """Returns available physical RAM in bytes (Windows & Linux/macOS)."""
+        import sys
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ]
+                stat = MEMORYSTATUSEX()
+                stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                    return int(stat.ullAvailPhys)
+            except Exception:
+                pass
+        else:
+            try:
+                with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("MemAvailable:"):
+                            return int(line.split()[1]) * 1024
+            except Exception:
+                pass
+        return 4 * 1024 * 1024 * 1024  # Conservative 4GB fallback
+
+    @staticmethod
+    def _dequant_q8(wq: np.ndarray, ws: np.ndarray) -> np.ndarray:
+        """Dequantizes Q8_0 (int8, float32 scales) into contiguous float32 matrix."""
+        M, K = wq.shape
+        nb = K // 32
+        return np.ascontiguousarray(
+            (wq.reshape(M, nb, 32).astype(np.float32) * ws[:, :, None]).reshape(M, K)
+        )
+
     def _load_weights(self):
-        """Builds tensor views for all layers."""
+        """Builds tensor views for all layers and pre-caches FP32 if RAM allows."""
         self.emb_q, self.emb_s = self._view_q8_0(self.off_embed, self.vocab_size, self.dim)
         self.final_norm = np.frombuffer(self.buf, dtype="<f4", count=self.dim, offset=self.off_final_norm)
+        self._rope_freqs = 1.0 / (
+            self.rope_theta ** (np.arange(0, self.head_dim, 2, dtype=np.float64) / self.head_dim)
+        )
 
         self.layers = []
         for l in range(self.n_layers):
@@ -241,6 +288,24 @@ class AsmBinModel:
                 "down_proj": next_mat(self.dim, self.hidden_dim),
             })
 
+        # Estimate FP32 footprint; if sufficient RAM, pre-dequantize for ~10x OpenBLAS speedup
+        per_layer_params = (
+            self.q_dim * self.dim
+            + self.kv_dim * self.dim * 2
+            + self.dim * self.q_dim
+            + self.hidden_dim * self.dim * 3
+        )
+        est_f32_bytes = (self.n_layers * per_layer_params + self.vocab_size * self.dim) * 4
+        avail_ram = self._get_available_ram_bytes()
+        self._use_f32_cache = avail_ram > int(est_f32_bytes * 1.4)
+        self.emb_f32 = None
+
+        if self._use_f32_cache:
+            self.emb_f32 = self._dequant_q8(self.emb_q, self.emb_s)
+            for L in self.layers:
+                for k in ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"):
+                    L[k + "_f32"] = self._dequant_q8(*L[k])
+
     @staticmethod
     def matvec_q8_f32(wq: np.ndarray, ws: np.ndarray, x: np.ndarray) -> np.ndarray:
         """Matrix-vector multiplication for Q8_0 weights with FP32 vector."""
@@ -248,7 +313,7 @@ class AsmBinModel:
         nb = K // 32
         wb = wq.reshape(M, nb, 32).astype(np.float32)
         xb = x.reshape(nb, 32).astype(np.float32)
-        dots = np.einsum("mnb,nb->mn", wb, xb, optimize=True).astype(np.float32)
+        dots = np.einsum("mnb,nb->mn", wb, xb, optimize=False).astype(np.float32)
         return np.sum(dots * ws, axis=1, dtype=np.float32)
 
     @staticmethod
@@ -267,6 +332,94 @@ class AsmBinModel:
         silu = (gate * num) / (np.float32(1.0) + e)
         return (silu * up).astype(np.float32)
 
+    def _proj(self, L: Dict[str, Any], name: str, x: np.ndarray) -> np.ndarray:
+        """Fast projection using cached FP32 BLAS if available, else Q8_0."""
+        f32_key = name + "_f32"
+        if f32_key in L:
+            return L[f32_key] @ x
+        return self.matvec_q8_f32(*L[name], x)
+
+    def forward_prompt(
+        self,
+        tokens: List[int],
+        start_pos: int = 0,
+        compute_logits: bool = True,
+    ) -> Optional[np.ndarray]:
+        """Batched prompt prefill using SGEMM for high-speed prompt processing."""
+        T = len(tokens)
+        if T == 0:
+            return None
+        if T == 1 or not self._use_f32_cache:
+            out = None
+            for i, tid in enumerate(tokens):
+                out = self.forward_token(tid, start_pos + i, compute_logits=(compute_logits and i == T - 1))
+            return out
+
+        # Gather embeddings: [T, dim]
+        x = self.emb_f32[tokens].copy()
+        half = self.head_dim // 2
+        positions = np.arange(start_pos, start_pos + T, dtype=np.float64)[:, None]
+        angles = positions * self._rope_freqs[None, :]  # [T, half]
+        cos_v = np.cos(angles).astype(np.float32)[:, None, :]  # [T, 1, half]
+        sin_v = np.sin(angles).astype(np.float32)[:, None, :]
+        scale = np.float32(1.0 / math.sqrt(self.head_dim))
+        gqa_group = self.n_heads // self.n_kv_heads
+
+        # Causal mask for prefill [T, T]
+        causal_mask = np.triu(np.full((T, T), -1e9, dtype=np.float32), k=1)
+
+        for l in range(self.n_layers):
+            L = self.layers[l]
+            h = self.rmsnorm(x, L["in_norm"], self.rms_norm_eps)
+            q = (h @ L["q_proj_f32"].T).reshape(T, self.n_heads, self.head_dim)
+            k = (h @ L["k_proj_f32"].T).reshape(T, self.n_kv_heads, self.head_dim)
+            v = (h @ L["v_proj_f32"].T).reshape(T, self.n_kv_heads, self.head_dim)
+
+            q = self.rmsnorm(q, L["q_norm"], self.rms_norm_eps)
+            k = self.rmsnorm(k, L["k_norm"], self.rms_norm_eps)
+
+            q1, q2 = q[..., :half], q[..., half:]
+            q = np.concatenate([q1 * cos_v - q2 * sin_v, q2 * cos_v + q1 * sin_v], axis=-1)
+            k1, k2 = k[..., :half], k[..., half:]
+            k = np.concatenate([k1 * cos_v - k2 * sin_v, k2 * cos_v + k1 * sin_v], axis=-1)
+
+            self._k_cache[l, start_pos : start_pos + T] = k
+            self._v_cache[l, start_pos : start_pos + T] = v
+
+            # Vectorized causal GQA attention
+            k_ctx = self._k_cache[l, : start_pos + T]  # [S, kv_heads, head_dim]
+            v_ctx = self._v_cache[l, : start_pos + T]
+
+            q_g = q.reshape(T, self.n_kv_heads, gqa_group, self.head_dim).transpose(1, 2, 0, 3)  # [kv, g, T, D]
+            k_g = k_ctx.transpose(1, 2, 0)[:, None, :, :]  # [kv, 1, D, S]
+            scores = np.matmul(q_g, k_g) * scale  # [kv, g, T, S]
+            if start_pos == 0:
+                scores += causal_mask[None, None, :, :]
+            else:
+                scores[:, :, :, start_pos:] += causal_mask[None, None, :, :]
+
+            scores -= np.max(scores, axis=-1, keepdims=True)
+            weights = np.exp(scores)
+            weights /= np.sum(weights, axis=-1, keepdims=True)
+
+            v_g = v_ctx.transpose(1, 0, 2)[:, None, :, :]  # [kv, 1, S, D]
+            attn_out = np.matmul(weights, v_g).transpose(2, 0, 1, 3).reshape(T, self.q_dim)
+
+            x += attn_out @ L["o_proj_f32"].T
+
+            # FFN
+            h_mlp = self.rmsnorm(x, L["post_norm"], self.rms_norm_eps)
+            gate = h_mlp @ L["gate_proj_f32"].T
+            up = h_mlp @ L["up_proj_f32"].T
+            swiglu = self.silu_mul(gate, up)
+            x += swiglu @ L["down_proj_f32"].T
+
+        if not compute_logits:
+            return None
+
+        x_norm = self.rmsnorm(x[-1], self.final_norm, self.rms_norm_eps)
+        return self.emb_f32 @ x_norm
+
     def forward_token(
         self,
         token_id: int,
@@ -274,15 +427,16 @@ class AsmBinModel:
         compute_logits: bool = True,
     ) -> Optional[np.ndarray]:
         """Executes a single token forward pass updating internal KV-cache."""
-        # Dequantize embedding for current token
-        x = (
-            self.emb_q[token_id].reshape(-1, 32).astype(np.float32)
-            * self.emb_s[token_id][:, None]
-        ).reshape(-1)
+        if self.emb_f32 is not None:
+            x = self.emb_f32[token_id].copy()
+        else:
+            x = (
+                self.emb_q[token_id].reshape(-1, 32).astype(np.float32)
+                * self.emb_s[token_id][:, None]
+            ).reshape(-1)
 
         half = self.head_dim // 2
-        freqs = 1.0 / (self.rope_theta ** (np.arange(0, self.head_dim, 2, dtype=np.float64) / self.head_dim))
-        angles = pos * freqs
+        angles = pos * self._rope_freqs
         cos_v = np.cos(angles).astype(np.float32)[None, :]
         sin_v = np.sin(angles).astype(np.float32)[None, :]
         scale = np.float32(1.0 / math.sqrt(self.head_dim))
@@ -291,9 +445,9 @@ class AsmBinModel:
         for l in range(self.n_layers):
             L = self.layers[l]
             h = self.rmsnorm(x, L["in_norm"], self.rms_norm_eps)
-            q = self.matvec_q8_f32(*L["q_proj"], h).reshape(self.n_heads, self.head_dim)
-            k = self.matvec_q8_f32(*L["k_proj"], h).reshape(self.n_kv_heads, self.head_dim)
-            v = self.matvec_q8_f32(*L["v_proj"], h).reshape(self.n_kv_heads, self.head_dim)
+            q = self._proj(L, "q_proj", h).reshape(self.n_heads, self.head_dim)
+            k = self._proj(L, "k_proj", h).reshape(self.n_kv_heads, self.head_dim)
+            v = self._proj(L, "v_proj", h).reshape(self.n_kv_heads, self.head_dim)
 
             # QK-Norm per head
             q = self.rmsnorm(q, L["q_norm"], self.rms_norm_eps)
@@ -308,40 +462,36 @@ class AsmBinModel:
             self._k_cache[l, pos] = k
             self._v_cache[l, pos] = v
 
-            # Grouped Query Attention (GQA)
+            # Vectorized Grouped Query Attention (GQA)
             k_ctx = self._k_cache[l, : pos + 1]  # [T, kv_heads, head_dim]
             v_ctx = self._v_cache[l, : pos + 1]
 
-            attn_out = np.zeros((self.n_heads, self.head_dim), dtype=np.float32)
-            for h_idx in range(self.n_heads):
-                kv_h = h_idx // gqa_group
-                k_head = k_ctx[:, kv_h, :]  # [T, head_dim]
-                q_head = q[h_idx]           # [head_dim]
-                scores = np.dot(k_head, q_head) * scale  # [T]
-                scores -= np.max(scores)
-                weights = np.exp(scores)
-                weights /= np.sum(weights)
-                attn_out[h_idx] = np.dot(weights, v_ctx[:, kv_h, :])
+            q_g = q.reshape(self.n_kv_heads, gqa_group, self.head_dim)        # [kv, g, D]
+            k_g = k_ctx.transpose(1, 2, 0)                                     # [kv, D, T]
+            scores = np.matmul(q_g, k_g) * scale                               # [kv, g, T]
+            scores -= np.max(scores, axis=-1, keepdims=True)
+            weights = np.exp(scores)
+            weights /= np.sum(weights, axis=-1, keepdims=True)
+            v_g = v_ctx.transpose(1, 0, 2)                                     # [kv, T, D]
+            attn_vec = np.matmul(weights, v_g).reshape(-1)                     # [n_heads * D]
 
-            attn_vec = attn_out.reshape(-1)
-            o_vec = self.matvec_q8_f32(*L["o_proj"], attn_vec)
-            x += o_vec
+            x += self._proj(L, "o_proj", attn_vec)
 
             # Feed-Forward Network (SwiGLU)
             h_mlp = self.rmsnorm(x, L["post_norm"], self.rms_norm_eps)
-            gate = self.matvec_q8_f32(*L["gate_proj"], h_mlp)
-            up = self.matvec_q8_f32(*L["up_proj"], h_mlp)
+            gate = self._proj(L, "gate_proj", h_mlp)
+            up = self._proj(L, "up_proj", h_mlp)
             swiglu = self.silu_mul(gate, up)
-            down = self.matvec_q8_f32(*L["down_proj"], swiglu)
-            x += down
+            x += self._proj(L, "down_proj", swiglu)
 
         if not compute_logits:
             return None
 
         # Final RMSNorm and tied LM head projection
         x_norm = self.rmsnorm(x, self.final_norm, self.rms_norm_eps)
-        logits = self.matvec_q8_f32(self.emb_q, self.emb_s, x_norm)
-        return logits
+        if self.emb_f32 is not None:
+            return self.emb_f32 @ x_norm
+        return self.matvec_q8_f32(self.emb_q, self.emb_s, x_norm)
 
     def reset_cache(self):
         """Resets the KV-cache and position pointer."""
@@ -383,15 +533,9 @@ class AsmBinModel:
             t_start = time.perf_counter()
             pos = 0
 
-            # Prefill prompt tokens
-            for i, tid in enumerate(prompt_tokens[:-1]):
-                self.forward_token(tid, pos, compute_logits=False)
-                pos += 1
-
-            # Decode first token from last prompt token
-            last_prompt_tok = prompt_tokens[-1]
-            logits = self.forward_token(last_prompt_tok, pos, compute_logits=True)
-            pos += 1
+            # Prefill prompt tokens (batched SGEMM if FP32 cache is active)
+            logits = self.forward_prompt(prompt_tokens, start_pos=0, compute_logits=True)
+            pos = len(prompt_tokens)
 
             gen_tokens = []
             accumulated = ""
