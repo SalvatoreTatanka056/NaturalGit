@@ -36,10 +36,10 @@ Nella cartella `dist/` trovi i pacchetti precompilati per ogni sistema operativo
 |---|---|---|---|
 | **`ngit.exe`** | Windows x64 | **Eseguibile autonomo standalone** (funziona anche senza Python installato!) | ~12 MB |
 | **`install.bat`** | Windows | **Installer 1-Click** per Windows (installa e registra nel PATH utente) | ~2 KB |
-| **`naturalgit_1.0.0_all.deb`** | Linux (Debian / Ubuntu / Mint) | **Pacchetto nativo `.deb`** installabile con `dpkg -i` o `apt` | ~22 KB |
-| **`install.sh`** | Linux Universale | **Installer automatico per Linux** (Fedora, Arch, RHEL, CentOS, ecc.) | ~2 KB |
-| **`naturalgit-linux.tar.gz`** | Linux Universale | Archivio compresso completo di sorgenti e installer Linux | ~71 KB |
-| **`naturalgit-1.0.0-py3-none-any.whl`** | Universale (Win/Linux/Mac) | Pacchetto Python Wheel standard distribuibile su PyPI | ~26 KB |
+| **`naturalgit_1.0.0_all.deb`** | Linux (Debian / Ubuntu / Mint) | **Pacchetto nativo `.deb`** (include NaturalGit, motore locale `llmasm` e acceleratore C `libllmasm.so`) | ~59 KB |
+| **`install.sh`** | Linux Universale | **Installer automatico per Linux** con compilazione nativa opzionale AVX2/OpenMP | ~3 KB |
+| **`naturalgit-linux.tar.gz`** | Linux Universale | **Archivio completo per Linux** (sorgenti, installer `install.sh`, modulo `llmasm` e motore C) | ~98 KB |
+| **`naturalgit-1.0.0-py3-none-any.whl`** | Universale (Win/Linux/Mac) | **Pacchetto Python Wheel** pronto all'uso con integrazione `naturalgit` + `llmasm` | ~39 KB |
 
 ---
 

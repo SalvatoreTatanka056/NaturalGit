@@ -24,12 +24,14 @@ def get_shared_lib_name() -> str:
 
 
 def find_compiled_lib() -> Optional[Path]:
-    """Finds existing compiled C library in package dirs or src_c."""
+    """Finds existing compiled C library in package dirs, src_c, or system lib paths."""
     target_name = get_shared_lib_name()
     candidates = [
         Path(__file__).resolve().parent / target_name,
         SRC_C_DIR / target_name,
         Path.cwd() / target_name,
+        Path("/usr/lib") / target_name,
+        Path("/usr/local/lib") / target_name,
     ]
     for p in candidates:
         if p.exists():
