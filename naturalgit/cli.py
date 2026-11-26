@@ -101,7 +101,18 @@ def process_query(
                 original_query=query
             )
         elif provider in ["local", "llmasm"]:
-            # If user explicitly configured provider=local, do NOT call cloud LLMs without permission!
+            # If user explicitly configured provider=local, try offline heuristic fallback before giving up
+            heur_res = match_heuristic(query, ctx)
+            if heur_res:
+                return execute_proposal(
+                    command=heur_res.command,
+                    explanation=heur_res.explanation,
+                    engine_name="Motore Euristico Locale (Offline Fallback)",
+                    is_destructive=heur_res.is_destructive,
+                    auto_confirm=auto_confirm,
+                    dry_run=dry_run,
+                    original_query=query
+                )
             print_warning("Provider impostato su 'local' ma l'esecuzione con llmasm non è riuscita.")
             print_info("Verifica il percorso del modello con 'ngit config --show'.")
             print_info("Se vuoi passare a un altro provider: 'ngit config --provider gemini'")

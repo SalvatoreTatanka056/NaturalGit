@@ -235,11 +235,17 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
         print_info("Elaborazione con motore locale llmasm in corso...")
 
         model = load_model(model_path, backend=backend, threads=threads)
-        formatted_prompt = f"Sei un assistente Git. Traduci la richiesta dell'utente in un comando git valido. Rispondi solo in formato JSON: {{\"command\": \"git ...\", \"explanation\": \"...\"}} per la richiesta: {prompt}"
+        formatted_prompt = (
+            "Sei un assistente Git. Traduci SEMPRE la richiesta dell'utente in un comando Git valido.\n"
+            'Esempio: "elenca file" -> {"command": "git ls-files", "explanation": "Elenca file tracciati"}\n'
+            'Esempio: "mostra log" -> {"command": "git log --oneline -n 5", "explanation": "Mostra cronologia"}\n'
+            f'Richiesta: {prompt}\n'
+            'Rispondi SOLO in formato JSON: {"command": "git ...", "explanation": "..."}'
+        )
         
         raw_text = model.generate(
             formatted_prompt,
-            max_tokens=35,
+            max_tokens=55,
             temperature=0.0,
             chat_format=True,
             think=False,
@@ -249,30 +255,49 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
             raw_text = raw_text.text
         raw_text = str(raw_text).strip()
 
-        # Parse JSON output
+        # Parse command and explanation
         import re
-        json_match = re.search(r"\{.*?\}", raw_text, re.DOTALL)
-        if json_match:
-            try:
-                parsed = json.loads(json_match.group(0))
-                cmd = str(parsed.get("command", "")).strip()
-                if cmd and not cmd.startswith("git ") and not cmd == "git":
-                    cmd = f"git {cmd}"
-                
-                destructive_keywords = ["reset --hard", "clean -f", "push --force", "push -f", "branch -D"]
-                is_destructive = parsed.get("is_destructive", False) or any(k in cmd for k in destructive_keywords)
-                
-                return MatchResult(
-                    command=cmd,
-                    explanation=parsed.get("explanation", "Eseguito con motore locale llmasm"),
-                    is_destructive=is_destructive,
-                    confidence=0.92
-                )
-            except Exception:
-                pass
+        cmd = None
+        exp = "Eseguito con motore locale llmasm"
+
+        cmd_match = re.search(r'"command"\s*:\s*"([^"]+)"', raw_text)
+        if cmd_match:
+            cmd = cmd_match.group(1).strip()
+            exp_match = re.search(r'"explanation"\s*:\s*"([^"]*)', raw_text)
+            if exp_match:
+                exp = exp_match.group(1).strip().rstrip('"} \n')
+        else:
+            json_match = re.search(r"\{.*?\}", raw_text, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group(0))
+                    cmd = str(parsed.get("command", "")).strip()
+                    exp = parsed.get("explanation", exp)
+                except Exception:
+                    pass
+
+        if cmd:
+            if not cmd.startswith("git ") and not cmd == "git":
+                cmd = f"git {cmd}"
+            
+            # If command relates to git ls-files and prompt mentions an extension, refine pattern
+            if "git ls-files" in cmd:
+                ext_match = re.search(r'(?:estensione|\*?\.)\s*([a-zA-Z0-9_-]+)', prompt, re.IGNORECASE)
+                if ext_match:
+                    ext = ext_match.group(1).lstrip('.')
+                    cmd = f'git ls-files "*.{ext}"'
+
+            destructive_keywords = ["reset --hard", "clean -f", "push --force", "push -f", "branch -D"]
+            is_destructive = any(k in cmd for k in destructive_keywords)
+            return MatchResult(
+                command=cmd,
+                explanation=exp,
+                is_destructive=is_destructive,
+                confidence=0.92
+            )
         
-        # Regex search for git command
-        git_match = re.search(r"git\s+[a-zA-Z0-9\-_./ ]+", raw_text)
+        # Regex fallback for any git command
+        git_match = re.search(r"git\s+[a-zA-Z0-9\-_./ *\"']+", raw_text)
         if git_match:
             cmd = git_match.group(0).strip()
             destructive_keywords = ["reset --hard", "clean -f", "push --force", "push -f", "branch -D"]

@@ -79,6 +79,14 @@ def match_heuristic(query: str, ctx: Optional[GitContext] = None) -> Optional[Ma
     if re.search(r'\b(cosa ho (modificato|cambiato|toccato)|quali file sono (cambiati|modificati)|stato|status|situazione|mostra (lo )?stato)\b', low):
         return MatchResult("git status", "Mostra lo stato dell'albero di lavoro e dell'area di staging.")
 
+    # Tracked files listing (all or by extension)
+    if "stato" not in low and re.search(r'\b(elenca|mostra|lista|trova|quali)\b.*\b(file|file tracciati|tutti i file)\b', low):
+        ext_match = re.search(r'(?:estensione|\*?\.)\s*([a-zA-Z0-9_-]+)', low)
+        if ext_match:
+            ext = ext_match.group(1).lstrip('.')
+            return MatchResult(f'git ls-files "*.{ext}"', f'Elenca tutti i file tracciati da Git con estensione .{ext}.')
+        return MatchResult("git ls-files", "Elenca tutti i file tracciati da Git nel repository.")
+
     # Search in commit history
     search_commit = re.search(r'\b(cerca|trova)\b.*\bcommit\b.*\b(con|parola|messaggio|testo)\s+([\'"].+?[\'"]|\S+)', q, re.I)
     if search_commit:
