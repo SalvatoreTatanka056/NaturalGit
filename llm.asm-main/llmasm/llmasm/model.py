@@ -297,6 +297,7 @@ class AsmBinModel:
         think: bool = False,
         stream: bool = False,
         stop_tokens: Optional[List[int]] = None,
+        stop_strings: Optional[List[str]] = None,
     ) -> Union[GenerationOutput, Generator[str, None, None]]:
         """
         Generates text completion.
@@ -331,6 +332,7 @@ class AsmBinModel:
             pos += 1
 
             gen_tokens = []
+            accumulated = ""
             for _ in range(max_tokens):
                 if pos >= self.max_seq_len:
                     break
@@ -354,7 +356,12 @@ class AsmBinModel:
                     break
 
                 gen_tokens.append(next_tok)
-                yield self.tokenizer.decode([next_tok])
+                piece = self.tokenizer.decode([next_tok])
+                accumulated += piece
+                yield piece
+
+                if stop_strings and any(s in accumulated for s in stop_strings):
+                    break
 
                 logits = self.forward_token(next_tok, pos, compute_logits=True)
                 pos += 1

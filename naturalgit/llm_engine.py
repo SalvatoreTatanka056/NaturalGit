@@ -231,12 +231,20 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
     backend = config.get("local_backend", "auto")
     threads = int(config.get("local_threads", 4))
     try:
+        from .ui import print_info
+        print_info("Elaborazione con motore locale llmasm in corso...")
+
         model = load_model(model_path, backend=backend, threads=threads)
-        branch = ctx_data.get("branch", "main")
-        staged = ctx_data.get("staged_count", 0)
-        formatted_prompt = f"{SYSTEM_PROMPT}\nBranch: {branch}, InStaging: {staged}\nRichiesta: {prompt}\nJSON:"
+        formatted_prompt = f"Sei un assistente Git. Traduci la richiesta dell'utente in un comando git valido. Rispondi solo in formato JSON: {{\"command\": \"git ...\", \"explanation\": \"...\"}} per la richiesta: {prompt}"
         
-        raw_text = model.generate(formatted_prompt, max_tokens=100, temperature=0.1)
+        raw_text = model.generate(
+            formatted_prompt,
+            max_tokens=35,
+            temperature=0.0,
+            chat_format=True,
+            think=False,
+            stop_strings=["}\n", "}"]
+        )
         if hasattr(raw_text, "text"):
             raw_text = raw_text.text
         raw_text = str(raw_text).strip()
@@ -245,18 +253,33 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
         import re
         json_match = re.search(r"\{.*?\}", raw_text, re.DOTALL)
         if json_match:
-            parsed = json.loads(json_match.group(0))
+            try:
+                parsed = json.loads(json_match.group(0))
+                cmd = str(parsed.get("command", "")).strip()
+                if cmd and not cmd.startswith("git ") and not cmd == "git":
+                    cmd = f"git {cmd}"
+                
+                destructive_keywords = ["reset --hard", "clean -f", "push --force", "push -f", "branch -D"]
+                is_destructive = parsed.get("is_destructive", False) or any(k in cmd for k in destructive_keywords)
+                
+                return MatchResult(
+                    command=cmd,
+                    explanation=parsed.get("explanation", "Eseguito con motore locale llmasm"),
+                    is_destructive=is_destructive,
+                    confidence=0.92
+                )
+            except Exception:
+                pass
+        
+        # Regex search for git command
+        git_match = re.search(r"git\s+[a-zA-Z0-9\-_./ ]+", raw_text)
+        if git_match:
+            cmd = git_match.group(0).strip()
+            destructive_keywords = ["reset --hard", "clean -f", "push --force", "push -f", "branch -D"]
             return MatchResult(
-                command=parsed["command"],
-                explanation=parsed.get("explanation", f"Eseguito con motore locale llmasm ({backend})"),
-                is_destructive=parsed.get("is_destructive", False),
-                confidence=0.92
-            )
-        elif raw_text.startswith("git "):
-            return MatchResult(
-                command=raw_text.splitlines()[0],
-                explanation=f"Comando generato dal motore locale llmasm ({backend})",
-                is_destructive=False,
+                command=cmd,
+                explanation="Comando generato dal motore locale llmasm",
+                is_destructive=any(k in cmd for k in destructive_keywords),
                 confidence=0.85
             )
     except Exception as e:
