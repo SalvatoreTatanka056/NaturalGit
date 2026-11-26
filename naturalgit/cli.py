@@ -415,6 +415,51 @@ def run_repl(ctx: GitContext, config: dict):
         print()
 
 
+def print_configuration_help():
+    """Prints comprehensive terminal guide for all configurations."""
+    print(f"""
+{Colors.BOLD}{Colors.CYAN}=== 🌿 GUIDA CONFIGURAZIONI NATURALGIT (ngit) ==={Colors.RESET}
+
+{Colors.BOLD}1. VISUALIZZARE CONFIGURAZIONE ATTUALE:{Colors.RESET}
+   ngit config --show
+
+{Colors.BOLD}2. SCEGLIERE UN PROVIDER AI (--provider):{Colors.RESET}
+   ngit config --provider local        # Motore locale llmasm in C (100% offline, zero internet)
+   ngit config --provider gemini       # Google Gemini (ultra-rapido, default: flash-lite)
+   ngit config --provider ollama       # Ollama locale (llama3, qwen2.5-coder)
+   ngit config --provider openai       # OpenAI o compatibili (vLLM, LM Studio)
+   ngit config --provider heuristic    # Regole euristiche offline (<5ms, senza AI)
+   ngit config --provider auto         # Selezione automatica intelligente
+
+{Colors.BOLD}3. MOTORE LOCALE C / ASSEMBLY (llmasm):{Colors.RESET}
+   ngit config --local-model "C:\\percorso\\modello.asmbin"   # Imposta modello e attiva provider local
+   ngit config --local-backend c                             # Backend C (AVX2 DLL nativa) o numpy
+   ngit config --local-threads 8                             # Numero di thread CPU
+
+{Colors.BOLD}4. MODELLI CLOUD ED OLLAMA:{Colors.RESET}
+   ngit config --api-key "CHIAVE_API"                        # Salva la chiave API (Gemini/OpenAI)
+   ngit config --model gemini-flash-lite-latest              # Modello per il provider attivo
+   ngit config --ollama-url http://localhost:11434           # URL server Ollama
+
+{Colors.BOLD}5. ESECUZIONE AUTOMATICA SENZA PROMPT:{Colors.RESET}
+   ngit config --auto-confirm true                           # Esegue senza chiedere [Si/no]
+   ngit config --auto-confirm false                          # Chiede sempre conferma (consigliato)
+
+{Colors.BOLD}6. FLAG DI ESECUZIONE AL VOLO:{Colors.RESET}
+   ngit -l "frase"                     # Forza motore locale llmasm per questo comando
+   ngit -l -j 8 "frase"                # Forza motore locale con 8 thread CPU
+   ngit -y "frase"                     # Esegue immediatamente senza prompt
+   ngit -d "frase"                     # Dry-run: simula senza toccare il repository
+   ngit -dc "titolo opzionale"         # Commit descrittivo completo con metadati utente/file
+   ngit -i                             # Avvia la shell interattiva REPL
+
+{Colors.BOLD}7. RIPRISTINO VALORI DI FABBRICA:{Colors.RESET}
+   ngit config --reset
+
+{Colors.DIM}Consulta la documentazione completa in: GUIDA_CONFIGURAZIONE.md{Colors.RESET}
+""")
+
+
 def main(argv: Optional[List[str]] = None):
     if argv is None:
         argv = sys.argv[1:]
@@ -422,8 +467,16 @@ def main(argv: Optional[List[str]] = None):
     config = load_config()
     ctx = GitContext()
 
+    # Help command
+    if argv and argv[0] in ["help", "aiuto", "--help-config"]:
+        print_configuration_help()
+        return
+
     # Explicit subcommands
     if argv and argv[0] == "config":
+        if len(argv) > 1 and argv[1] in ["help", "aiuto"]:
+            print_configuration_help()
+            return
         config_parser = argparse.ArgumentParser(prog="ngit config", description="Configura NaturalGit")
         config_parser.add_argument("--show", action="store_true", help="Mostra la configurazione corrente")
         config_parser.add_argument("--provider", choices=["auto", "ollama", "gemini", "openai", "heuristic", "local", "llmasm"], help="Seleziona il provider")

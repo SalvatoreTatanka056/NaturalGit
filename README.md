@@ -244,26 +244,38 @@ ngit "fammi vedere chi è l'ultimo autore che ha fatto un commit"
 
 ## ⚙️ Configurazione (`ngit config`)
 
+> 📖 **Per la documentazione completa di tutti i parametri, provider, modelli e scenari, consulta la [Guida Completa alle Configurazioni (GUIDA_CONFIGURAZIONE.md)](GUIDA_CONFIGURAZIONE.md).**
+
+Puoi visualizzare l'help interattivo completo da terminale con:
+```cmd
+ngit help
+# oppure:
+ngit config help
+```
+
 Visualizza la configurazione attuale:
 ```cmd
 ngit config --show
 ```
 
-Opzioni disponibili:
+Opzioni e comandi principali:
 ```cmd
-# Imposta o aggiorna la chiave Gemini
-ngit config --provider gemini --api-key LA_TUA_CHIAVE
+# 1. Motore Locale llmasm in C (100% offline, zero internet)
+ngit config --local-model "C:\models\qwen3-0.6b-q8_0.asmbin"
+ngit config --local-backend c
+ngit config --local-threads 8
 
-# Imposta il modello a bassissima latenza (predefinito)
+# 2. Google Gemini (Cloud a bassissima latenza)
+ngit config --provider gemini --api-key LA_TUA_CHIAVE
 ngit config --model gemini-flash-lite-latest
 
-# Attiva esecuzione automatica senza prompt
-ngit config --auto-confirm true
-
-# Usa Ollama (100% locale, gratuito e offline)
+# 3. Ollama (Locale gratuito)
 ngit config --provider ollama --model llama3
 
-# Ripristina impostazioni iniziali
+# 4. Attiva esecuzione automatica senza prompt
+ngit config --auto-confirm true
+
+# 5. Ripristina impostazioni iniziali
 ngit config --reset
 ```
 
