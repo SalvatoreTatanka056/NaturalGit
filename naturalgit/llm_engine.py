@@ -259,7 +259,9 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
                 is_destructive=False,
                 confidence=0.85
             )
-    except Exception:
+    except Exception as e:
+        from .ui import print_warning
+        print_warning(f"Errore durante l'esecuzione con llmasm: {e}")
         return None
     return None
 

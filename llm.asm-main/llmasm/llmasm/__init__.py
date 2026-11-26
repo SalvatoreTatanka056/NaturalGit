@@ -49,10 +49,8 @@ def load_model(
     if backend in ("c", "auto"):
         try:
             return CAsmBinModel(model_path_str, lib_path=lib_path, threads=threads)
-        except Exception as e:
-            if backend == "c":
-                raise e
-            # Auto fallback to NumPy
+        except Exception:
+            # If C engine is not yet compiled, gracefully fallback to NumPy
             pass
 
     return AsmBinModel(model_path_str)
