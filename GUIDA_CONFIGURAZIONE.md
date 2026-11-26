@@ -69,6 +69,9 @@ ngit config --local-backend c
 
 # 3. Imposta i thread CPU da usare:
 ngit config --local-threads 8
+
+# 4. Imposta il numero massimo di token generati (default: 80, aumenta per risposte più lunghe):
+ngit config --local-max-tokens 150
 ```
 
 > [!TIP]
@@ -157,6 +160,7 @@ ngit config --provider auto
 | `--local-model` | `<percorso.asmbin>` | Percorso assoluto o relativo del modello binario `.asmbin` per `llmasm`. |
 | `--local-backend` | `auto`, `c`, `numpy` | Backend di calcolo: `c` (DLL/SO nativa AVX2), `numpy` (fallback puro). |
 | `--local-threads` | `<numero>` | Numero di thread CPU per il calcolo parallelo del motore locale (es. `4`, `8`, `16`). |
+| `--local-max-tokens` | `<numero>` | Numero massimo di token generati per risposta (default: `80`; aumenta per output più lunghi, es. `150`). |
 | `--gemini-model` | `<nome_modello>` | Imposta specificamente il modello Gemini (es: `gemini-flash-lite-latest`). |
 | `--ollama-model` | `<nome_modello>` | Imposta specificamente il modello Ollama (es: `llama3`, `qwen2.5-coder:1.5b`). |
 | `--ollama-url` | `<url>` | Indirizzo del server Ollama (default: `http://localhost:11434`). |
@@ -174,6 +178,7 @@ Puoi combinare i flag di esecuzione con qualsiasi istruzione:
 | :--- | :--- | :--- |
 | `-l` | `--local` | Forza l'uso del motore locale nativo `llmasm` (.asmbin in C) per questo singolo comando. |
 | `-j <N>` | `--threads <N>` | Specifica il numero di thread CPU da usare per l'inferenza locale (es. `-j 8`). |
+| `-T <N>` | `--max-tokens <N>` | Numero massimo di token da generare per questo singolo comando (es. `-T 150`). Sovrascrive il valore salvato in config. |
 | `-y` | `--yes` | Esegue il comando proposto direttamente **senza chiedere conferma**. |
 | `-d` | `--dry-run` | Mostra quale comando verrebbe eseguito e la spiegazione **senza toccare nulla**. |
 | `-dc` | `--describe-commit` | Genera un commit descrittivo dettagliato con metadati utente, data, branch e metriche file. |
@@ -187,8 +192,8 @@ ngit -y "aggiungi tutti i file e committa dicendo fix login"
 # Simulazione sicura:
 ngit -d "elimina tutti i file non tracciati"
 
-# Esecuzione locale con 16 thread CPU:
-ngit -l -j 16 "fai un merge del branch feature con main"
+# Esecuzione locale con 16 thread CPU e 150 max token:
+ngit -l -j 16 -T 150 "fai un merge del branch feature con main"
 
 # Generazione di un commit descrittivo dettagliato:
 ngit -dc "implementazione autenticazione a due fattori"

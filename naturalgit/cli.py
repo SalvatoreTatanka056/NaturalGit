@@ -291,6 +291,10 @@ def handle_config_command(args: argparse.Namespace, config: dict):
     if getattr(args, "local_threads", None):
         config["local_threads"] = args.local_threads
         modified = True
+    if getattr(args, "local_max_tokens", None):
+        config["local_max_tokens"] = args.local_max_tokens
+        modified = True
+        print_info(f"Max token per il motore locale impostato a: {args.local_max_tokens}")
     if args.ollama_url:
         config["ollama_url"] = args.ollama_url
         modified = True
@@ -445,7 +449,8 @@ def print_configuration_help():
 {Colors.BOLD}3. MOTORE LOCALE C / ASSEMBLY (llmasm):{Colors.RESET}
    ngit config --local-model "C:\\percorso\\modello.asmbin"   # Imposta modello e attiva provider local
    ngit config --local-backend c                             # Backend C (AVX2 DLL nativa) o numpy
-   ngit config --local-threads 8                             # Numero di thread CPU
+   ngit config --local-threads 8                             # Numero di thread CPU (default: 4)
+   ngit config --local-max-tokens 120                        # Max token per risposta (default: 80)
 
 {Colors.BOLD}4. MODELLI CLOUD ED OLLAMA:{Colors.RESET}
    ngit config --api-key "CHIAVE_API"                        # Salva la chiave API (Gemini/OpenAI)
@@ -457,12 +462,14 @@ def print_configuration_help():
    ngit config --auto-confirm false                          # Chiede sempre conferma (consigliato)
 
 {Colors.BOLD}6. FLAG DI ESECUZIONE AL VOLO:{Colors.RESET}
-   ngit -l "frase"                     # Forza motore locale llmasm per questo comando
-   ngit -l -j 8 "frase"                # Forza motore locale con 8 thread CPU
-   ngit -y "frase"                     # Esegue immediatamente senza prompt
-   ngit -d "frase"                     # Dry-run: simula senza toccare il repository
-   ngit -dc "titolo opzionale"         # Commit descrittivo completo con metadati utente/file
-   ngit -i                             # Avvia la shell interattiva REPL
+   ngit -l "frase"                      # Forza motore locale llmasm per questo comando
+   ngit -l -j 8 "frase"                 # Forza motore locale con 8 thread CPU
+   ngit -l -T 150 "frase"               # Forza motore locale con 150 max token
+   ngit -l -j 8 -T 150 "frase"          # Thread e token personalizzati al volo
+   ngit -y "frase"                      # Esegue immediatamente senza prompt
+   ngit -d "frase"                      # Dry-run: simula senza toccare il repository
+   ngit -dc "titolo opzionale"          # Commit descrittivo completo con metadati utente/file
+   ngit -i                              # Avvia la shell interattiva REPL
 
 {Colors.BOLD}7. RIPRISTINO VALORI DI FABBRICA:{Colors.RESET}
    ngit config --reset
@@ -499,6 +506,7 @@ def main(argv: Optional[List[str]] = None):
         config_parser.add_argument("--local-model", help="Imposta il percorso del modello .asmbin per il motore locale llmasm")
         config_parser.add_argument("--local-backend", choices=["auto", "c", "numpy"], help="Imposta il backend per llmasm (auto, c o numpy)")
         config_parser.add_argument("--local-threads", type=int, help="Imposta il numero di thread CPU per il motore locale llmasm")
+        config_parser.add_argument("--local-max-tokens", type=int, help="Imposta il numero massimo di token generati dal motore locale llmasm (default: 80)")
         config_parser.add_argument("--ollama-url", help="URL di Ollama")
         config_parser.add_argument("--auto-confirm", choices=["true", "false"], help="Attiva/disattiva esecuzione automatica senza prompt [true/false]")
         config_parser.add_argument("--reset", action="store_true", help="Ripristina valori predefiniti")
@@ -530,6 +538,7 @@ def main(argv: Optional[List[str]] = None):
     parser.add_argument("query", nargs="*", help="Istruzione in linguaggio naturale (in italiano o inglese).")
     parser.add_argument("-l", "--local", action="store_true", help="Usa il motore locale llmasm (.asmbin / C engine) per l'inferenza.")
     parser.add_argument("-j", "--threads", type=int, default=None, help="Numero di thread CPU per l'inferenza locale (default da config)")
+    parser.add_argument("-T", "--max-tokens", type=int, default=None, dest="max_tokens", help="Max token generati dal motore locale llmasm (sovrascrive config)")
     parser.add_argument("-dc", "--describe-commit", action="store_true", help="Crea un commit descrittivo con tutti i metadati dell'utente e dei file.")
     parser.add_argument("-y", "--yes", action="store_true", help="Esegui automaticamente senza chiedere conferma.")
     parser.add_argument("-d", "--dry-run", action="store_true", help="Mostra il comando identificato senza eseguirlo.")
@@ -573,6 +582,8 @@ def main(argv: Optional[List[str]] = None):
     
     if args.threads is not None:
         config["local_threads"] = args.threads
+    if args.max_tokens is not None:
+        config["local_max_tokens"] = args.max_tokens
 
     auto_exec = args.yes or config.get("auto_confirm", False)
     process_query(query_text, ctx, config, auto_confirm=auto_exec, dry_run=args.dry_run, use_local=args.local)

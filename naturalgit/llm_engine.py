@@ -230,6 +230,7 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
 
     backend = config.get("local_backend", "auto")
     threads = int(config.get("local_threads", 4))
+    max_tokens = int(config.get("local_max_tokens", 80))
     try:
         from .ui import print_info
         print_info("Elaborazione con motore locale llmasm in corso...")
@@ -245,7 +246,7 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
         
         raw_text = model.generate(
             formatted_prompt,
-            max_tokens=55,
+            max_tokens=max_tokens,
             temperature=0.0,
             chat_format=True,
             think=False,
