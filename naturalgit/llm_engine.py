@@ -194,10 +194,22 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
         return None
 
     # Search for model path
-    model_path = config.get("local_model_path")
-    if not model_path or not os.path.exists(model_path):
+    raw_path = config.get("local_model_path", "")
+    model_path = ""
+    if isinstance(raw_path, str) and raw_path.strip():
+        expanded = os.path.expanduser(raw_path.strip().strip('"').strip("'"))
+        if os.path.exists(expanded):
+            model_path = expanded
+        else:
+            # Also check relative to current working directory
+            rel_candidate = os.path.abspath(expanded)
+            if os.path.exists(rel_candidate):
+                model_path = rel_candidate
+
+    if not model_path:
         candidates = [
             Path.cwd() / "models" / "qwen3-0.6b-q8_0.asmbin",
+            Path(__file__).resolve().parent.parent / "models" / "qwen3-0.6b-q8_0.asmbin",
             Path(__file__).resolve().parent.parent / "llm.asm-main" / "models" / "qwen3-0.6b-q8_0.asmbin",
             Path.home() / ".naturalgit" / "models" / "qwen3-0.6b-q8_0.asmbin",
         ]
@@ -211,6 +223,9 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
                 break
 
     if not model_path or not os.path.exists(model_path):
+        from .ui import print_warning
+        if raw_path:
+            print_warning(f"File modello locale non trovato nel percorso specificato: '{raw_path}'")
         return None
 
     backend = config.get("local_backend", "auto")

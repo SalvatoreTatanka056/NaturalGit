@@ -84,9 +84,10 @@ def process_query(
         )
 
     provider = config.get("provider", "auto").lower()
+    has_local_model = bool(config.get("local_model_path"))
 
-    # 1. Check if user requested local llmasm model (--local or provider=local)
-    if use_local or provider in ["local", "llmasm"]:
+    # 1. Check if user requested local llmasm model (--local or provider=local or auto with local_model_path)
+    if use_local or provider in ["local", "llmasm"] or (provider == "auto" and has_local_model):
         llm_res = query_llm(query, ctx, config, force_local=True)
         if llm_res:
             backend_name = config.get("local_backend", "auto").upper()
@@ -99,10 +100,15 @@ def process_query(
                 dry_run=dry_run,
                 original_query=query
             )
+        elif provider in ["local", "llmasm"]:
+            # If user explicitly configured provider=local, do NOT call cloud LLMs without permission!
+            print_warning("Provider impostato su 'local' ma l'esecuzione con llmasm non è riuscita.")
+            print_info("Verifica il percorso del modello con 'ngit config --show'.")
+            print_info("Se vuoi passare a un altro provider: 'ngit config --provider gemini'")
+            return False
         else:
-            print_warning("Nessun modello .asmbin trovato o errore di esecuzione con llmasm.")
-            print_info("Suggerimento: specifica il percorso del modello con 'ngit config --local-model <percorso.asmbin>'")
-            print_info("Continuo con i provider configurati...\n")
+            print_warning("Impossibile caricare il modello locale llmasm.")
+            print_info("Continuo con i provider cloud configurati...\n")
 
     provider = config.get("provider", "auto").lower()
     has_gemini = bool(config.get("gemini_api_key"))
@@ -263,8 +269,11 @@ def handle_config_command(args: argparse.Namespace, config: dict):
         config["openai_model"] = args.openai_model
         modified = True
     if getattr(args, "local_model", None):
-        config["local_model_path"] = args.local_model
+        clean_path = args.local_model.strip().strip('"').strip("'")
+        config["local_model_path"] = clean_path
+        config["provider"] = "local"
         modified = True
+        print_info(f"Provider impostato automaticamente su 'local' (modello: {clean_path})")
     if getattr(args, "local_backend", None):
         config["local_backend"] = args.local_backend
         modified = True
