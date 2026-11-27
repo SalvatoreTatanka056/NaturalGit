@@ -4,6 +4,7 @@ Comprehensive test suite for NaturalGit.
 import unittest
 from naturalgit.heuristic_engine import match_heuristic
 from naturalgit.git_context import GitContext
+from naturalgit.llm_engine import _generate_local_text
 
 
 class TestNaturalGit(unittest.TestCase):
@@ -202,6 +203,30 @@ class TestNaturalGit(unittest.TestCase):
         res4 = match_heuristic("clona https://github.com/user/repo.git", self.ctx)
         self.assertIsNotNone(res4)
         self.assertEqual(res4.command, "git clone https://github.com/user/repo.git")
+
+
+class TestLlmasmGenerateCompatibility(unittest.TestCase):
+    def test_legacy_generate_signature_omits_unsupported_options(self):
+        class LegacyModel:
+            def generate(self, prompt, max_tokens=64, temperature=0.0):
+                return prompt, max_tokens, temperature
+
+        result = _generate_local_text(LegacyModel(), "request", 80)
+
+        self.assertEqual(result, ("request", 80, 0.0))
+
+    def test_current_generate_signature_receives_chat_options(self):
+        class CurrentModel:
+            def generate(self, prompt, max_tokens=64, temperature=0.0, **kwargs):
+                return prompt, max_tokens, temperature, kwargs
+
+        result = _generate_local_text(CurrentModel(), "request", 80)
+
+        self.assertEqual(result[:3], ("request", 80, 0.0))
+        self.assertEqual(
+            result[3],
+            {"chat_format": True, "think": False, "stop_strings": ["}\n", "}"]},
+        )
 
 
 if __name__ == "__main__":

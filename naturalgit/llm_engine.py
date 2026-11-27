@@ -6,6 +6,7 @@ Supports:
 - OpenAI & Compatible APIs (Groq, DeepSeek, LM Studio, vLLM, etc.)
 """
 import json
+import inspect
 import urllib.request
 import urllib.error
 from typing import Any, Dict, Optional
@@ -21,6 +22,31 @@ except ImportError:
 SYSTEM_PROMPT = """Traduttore Git rapido. Rispondi esclusivamente in formato JSON:
 {"command": "comando git da eseguire", "explanation": "breve spiegazione in italiano", "is_destructive": false}
 Concatena più comandi con &&. Imposta is_destructive=true se elimina dati, rami o riscrive la storia."""
+
+
+def _generate_local_text(model: Any, prompt: str, max_tokens: int) -> Any:
+    """Pass only generation options supported by the installed llmasm version."""
+    options = {
+        "max_tokens": max_tokens,
+        "temperature": 0.0,
+        "chat_format": True,
+        "think": False,
+        "stop_strings": ["}\n", "}"],
+    }
+    try:
+        parameters = inspect.signature(model.generate).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+
+    if not any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    ):
+        supported = parameters or {"max_tokens": None, "temperature": None}
+        options = {name: value for name, value in options.items() if name in supported}
+
+    return model.generate(prompt, **options)
+
 
 def query_ollama(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) -> Optional[MatchResult]:
     """Queries local Ollama endpoint."""
@@ -251,14 +277,7 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
             'Rispondi SOLO in formato JSON: {"command": "git ...", "explanation": "..."}'
         )
         
-        raw_text = model.generate(
-            formatted_prompt,
-            max_tokens=max_tokens,
-            temperature=0.0,
-            chat_format=True,
-            think=False,
-            stop_strings=["}\n", "}"]
-        )
+        raw_text = _generate_local_text(model, formatted_prompt, max_tokens)
         if hasattr(raw_text, "text"):
             raw_text = raw_text.text
         raw_text = str(raw_text).strip()
