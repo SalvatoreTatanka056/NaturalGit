@@ -58,11 +58,12 @@ class CLibBinding:
         if lib_path is None:
             found = find_compiled_lib()
             if not found:
-                found = build_c_library(verbose=False)
+                found = build_c_library(verbose=True)
             if not found:
                 raise RuntimeError(
                     "C shared library (llmasm.dll / libllmasm.so) not found and could not be built automatically. "
-                    "Compile it with: cd src_c && make (or cmake)."
+                    "Install a supported C compiler (MSVC Build Tools on Windows, or GCC/Clang) and retry; "
+                    "the library is built automatically. You can also select backend='numpy'."
                 )
             lib_path = found
 
@@ -202,39 +203,61 @@ class CAsmBinModel:
         temperature: float = 0.0,
         top_k: int = 1,
         stream: bool = False,
+        chat_format: bool = False,
+        think: bool = False,
+        stop_tokens: Optional[List[int]] = None,
+        stop_strings: Optional[List[str]] = None,
     ) -> Union[str, Generator[str, None, None]]:
         """
         Runs generation directly inside native C.
         """
-        prompt_tokens = self.encode(prompt)
+        if chat_format:
+            prompt_tokens = [151644, 872, 198] + self.encode(prompt) + [151645, 198, 151644, 77091, 198]
+            if not think:
+                prompt_tokens += [151667, 271, 151668, 271]
+        else:
+            prompt_tokens = self.encode(prompt)
         if not prompt_tokens:
             prompt_tokens = [self.hdr.eos_1]
 
-        if stream:
-            def _stream_gen():
-                self.reset_cache()
-                pos = 0
-                for tid in prompt_tokens[:-1]:
-                    self._binding.cdll.llmasm_forward_token(self._handle, tid, pos, 0)
-                    pos += 1
+        use_custom_stopping = stop_tokens is not None or stop_strings is not None
+        stop_token_ids = set(
+            stop_tokens if stop_tokens is not None else (self.hdr.eos_1, self.hdr.eos_2)
+        )
 
-                last_tok = prompt_tokens[-1]
-                self._binding.cdll.llmasm_forward_token(self._handle, last_tok, pos, 1)
+        def _stream_gen():
+            self.reset_cache()
+            pos = 0
+            accumulated = ""
+            for tid in prompt_tokens[:-1]:
+                self._binding.cdll.llmasm_forward_token(self._handle, tid, pos, 0)
                 pos += 1
 
-                for _ in range(max_tokens):
-                    if pos >= self.hdr.max_seq_len:
-                        break
-                    next_tok = self._binding.cdll.llmasm_sample_topk(
-                        self._handle, c_float(temperature), top_k
-                    )
-                    if next_tok in (self.hdr.eos_1, self.hdr.eos_2):
-                        break
-                    yield self.decode_token(next_tok)
-                    self._binding.cdll.llmasm_forward_token(self._handle, next_tok, pos, 1)
-                    pos += 1
+            last_tok = prompt_tokens[-1]
+            self._binding.cdll.llmasm_forward_token(self._handle, last_tok, pos, 1)
+            pos += 1
 
+            for _ in range(max_tokens):
+                if pos >= self.hdr.max_seq_len:
+                    break
+                next_tok = self._binding.cdll.llmasm_sample_topk(
+                    self._handle, c_float(temperature), top_k
+                )
+                if next_tok in stop_token_ids:
+                    break
+                piece = self.decode_token(next_tok)
+                accumulated += piece
+                yield piece
+                if stop_strings and any(stop in accumulated for stop in stop_strings):
+                    break
+                self._binding.cdll.llmasm_forward_token(self._handle, next_tok, pos, 1)
+                pos += 1
+
+        if stream:
             return _stream_gen()
+
+        if use_custom_stopping:
+            return "".join(_stream_gen())
 
         # Direct C buffer generation
         c_prompt = (c_int * len(prompt_tokens))(*prompt_tokens)

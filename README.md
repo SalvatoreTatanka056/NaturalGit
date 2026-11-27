@@ -36,10 +36,10 @@ Nella cartella `dist/` trovi i pacchetti precompilati per ogni sistema operativo
 |---|---|---|---|
 | **`ngit.exe`** | Windows x64 | **Eseguibile autonomo standalone** (funziona anche senza Python installato!) | ~12 MB |
 | **`install.bat`** | Windows | **Installer 1-Click** per Windows (installa e registra nel PATH utente) | ~2 KB |
-| **`naturalgit_1.0.0_all.deb`** | Linux (Debian / Ubuntu / Mint) | **Pacchetto nativo `.deb`** (include NaturalGit, motore locale `llmasm` e acceleratore C `libllmasm.so`) | ~59 KB |
+| **`naturalgit_1.0.0_amd64.deb`** | Linux x86-64 (Debian / Ubuntu / Mint) | Pacchetto `.deb` con motore AVX2/OpenMP |
 | **`install.sh`** | Linux Universale | **Installer automatico per Linux** con compilazione nativa opzionale AVX2/OpenMP | ~3 KB |
-| **`naturalgit-linux.tar.gz`** | Linux Universale | **Archivio completo per Linux** (sorgenti, installer `install.sh`, modulo `llmasm` e motore C) | ~98 KB |
-| **`naturalgit-1.0.0-py3-none-any.whl`** | Universale (Win/Linux/Mac) | **Pacchetto Python Wheel** pronto all'uso con integrazione `naturalgit` + `llmasm` | ~39 KB |
+| **`naturalgit-linux.tar.gz`** | Linux x86-64 | **Archivio completo per Linux** (sorgenti, installer `install.sh`, modulo `llmasm` e motore C) | ~98 KB |
+| **`naturalgit-1.0.0-py3-none-any.whl`** | Universale (Win/Linux/Mac) | NaturalGit, `llmasm` e sorgenti C; il binario nativo viene compilato al primo uso se è disponibile un toolchain compatibile |
 
 ---
 
@@ -70,9 +70,9 @@ pip install dist/naturalgit-1.0.0-py3-none-any.whl
 
 #### Opzione 1: Pacchetto Debian / Ubuntu (`.deb`)
 ```bash
-sudo dpkg -i dist/naturalgit_1.0.0_all.deb
+sudo dpkg -i dist/naturalgit_1.0.0_amd64.deb
 # oppure
-sudo apt install ./dist/naturalgit_1.0.0_all.deb
+sudo apt install ./dist/naturalgit_1.0.0_amd64.deb
 ```
 Il comando `ngit` sarà subito disponibile globalmente in `/usr/bin/ngit`.
 
@@ -128,7 +128,7 @@ Se il flag `-l` / `--local` non viene passato, NaturalGit utilizza come sempre i
 Per configurare il modello locale:
 ```cmd
 ngit config --local-model C:\percorso\modello.asmbin
-ngit config --local-backend c  # oppure "auto" o "numpy"
+ngit config --local-backend auto  # prova C nativo; mostra se ripiega su NumPy
 ```
 
 ---
@@ -260,9 +260,9 @@ ngit config --show
 
 Opzioni e comandi principali:
 ```cmd
-# 1. Motore Locale llmasm in C (100% offline, zero internet)
+# 1. Motore Locale llmasm (offline)
 ngit config --local-model "C:\models\qwen3-0.6b-q8_0.asmbin"
-ngit config --local-backend c
+ngit config --local-backend auto  # prova C nativo; mostra se ripiega su NumPy
 ngit config --local-threads 8
 
 # 2. Google Gemini (Cloud a bassissima latenza)
@@ -278,6 +278,8 @@ ngit config --auto-confirm true
 # 5. Ripristina impostazioni iniziali
 ngit config --reset
 ```
+
+Il backend C viene compilato automaticamente al primo avvio e richiede un compilatore supportato (su Windows, MSVC Build Tools avviato da x64 Native Tools PowerShell) e una CPU AVX2. Usa `--local-backend c` per renderlo obbligatorio; `auto` segnala il backend realmente selezionato.
 
 ---
 

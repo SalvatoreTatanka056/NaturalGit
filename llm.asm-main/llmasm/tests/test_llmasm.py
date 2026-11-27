@@ -4,10 +4,14 @@ C Struct Alignment, and Inference.
 """
 
 import ctypes
+import io
 import os
 import struct
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from types import SimpleNamespace
+from unittest import mock
 import numpy as np
 
 import sys
@@ -16,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from llmasm.tokenizer import AsmTokenizer, FIB_MULT, HT_BITS
 from llmasm.converter import quantize_matrix_q8_0, align64
+from llmasm import CAsmBinModel, load_model
+from llmasm import c_builder
 from llmasm.model import AsmBinModel
 from llmasm.c_engine import CAsmBinHeader
 
@@ -201,6 +207,7 @@ class TestSyntheticModelInference(unittest.TestCase):
             model = AsmBinModel(tmp_path)
             self.assertEqual(model.dim, 32)
             self.assertEqual(model.n_layers, 1)
+            self.assertEqual(model.info["engine"], "NumPy CPU")
 
             # Test generation
             output = model.generate("Hi", max_tokens=5, temperature=0.0)
@@ -211,6 +218,97 @@ class TestSyntheticModelInference(unittest.TestCase):
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+
+class TestCBackendCompatibility(unittest.TestCase):
+    def make_model(self, sample_tokens=(), generated_text=None):
+        samples = iter(sample_tokens)
+        native = SimpleNamespace(
+            llmasm_forward_token=lambda *args: 0,
+            llmasm_sample_topk=mock.Mock(side_effect=lambda *args: next(samples)),
+            llmasm_free_model=lambda *args: None,
+        )
+        if generated_text is not None:
+            native.llmasm_generate = generated_text
+
+        model = object.__new__(CAsmBinModel)
+        model._handle = 1
+        model._binding = SimpleNamespace(cdll=native)
+        model.hdr = SimpleNamespace(eos_1=99, eos_2=100, max_seq_len=64)
+        model.encode = mock.Mock(return_value=[21, 22])
+        model.decode_token = mock.Mock()
+        model.reset_cache = mock.Mock()
+        return model, native
+
+    def test_chat_format_matches_numpy_token_template_for_c_backend(self):
+        prompt_tokens = []
+
+        def capture_generate(handle, prompt, prompt_len, *args):
+            prompt_tokens.extend(prompt[:prompt_len])
+            return 0
+
+        model, _ = self.make_model(generated_text=capture_generate)
+        self.assertEqual(model.generate("request", max_tokens=1, chat_format=True), "")
+        self.assertEqual(
+            prompt_tokens,
+            [151644, 872, 198, 21, 22, 151645, 198, 151644, 77091, 198, 151667, 271, 151668, 271],
+        )
+
+    def test_c_backend_stops_generation_on_stop_strings(self):
+        model, native = self.make_model(sample_tokens=[11, 12, 13])
+        model.decode_token.side_effect = {11: "{", 12: "}", 13: "ignored"}.__getitem__
+
+        result = model.generate("request", max_tokens=10, stop_strings=["}\n", "}"])
+
+        self.assertEqual(result, "{}")
+        self.assertEqual(native.llmasm_sample_topk.call_count, 2)
+
+    def test_explicit_c_backend_does_not_fall_back_to_numpy(self):
+        with mock.patch("llmasm.CAsmBinModel", side_effect=OSError("native library missing")):
+            with self.assertRaisesRegex(RuntimeError, "Native C backend requested"):
+                load_model("model.asmbin", backend="c")
+
+    def test_auto_backend_warns_when_it_falls_back_to_numpy(self):
+        numpy_model = mock.Mock()
+        with mock.patch("llmasm.CAsmBinModel", side_effect=OSError("native library missing")), \
+             mock.patch("llmasm.AsmBinModel", return_value=numpy_model):
+            with self.assertWarnsRegex(RuntimeWarning, "using NumPy instead"):
+                model = load_model("model.asmbin", backend="auto")
+        self.assertIs(model, numpy_model)
+
+    def test_native_build_uses_openmp_and_user_cache(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_dir = Path(temp_dir) / "cache"
+            commands = []
+
+            def compile_successfully(command, **kwargs):
+                commands.append(command)
+                target = Path(command[command.index("-o") + 1])
+                target.write_bytes(b"test library")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with mock.patch.object(c_builder, "get_build_dir", return_value=cache_dir), \
+                 mock.patch.object(
+                     c_builder.shutil, "which",
+                     side_effect=lambda name: "test-gcc" if name == "gcc" else None,
+                 ), \
+                 mock.patch.object(c_builder.subprocess, "run", side_effect=compile_successfully):
+                library = c_builder.build_c_library(verbose=False)
+
+            self.assertEqual(library, cache_dir / c_builder.get_shared_lib_name())
+            self.assertIn("-fopenmp", commands[0])
+            self.assertIn("-mavx2", commands[0])
+
+    def test_native_build_reports_missing_compilers(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = io.StringIO()
+            with mock.patch.object(c_builder, "get_build_dir", return_value=Path(temp_dir)), \
+                 mock.patch.object(c_builder.shutil, "which", return_value=None), \
+                 redirect_stdout(output):
+                library = c_builder.build_c_library(verbose=True)
+
+        self.assertIsNone(library)
+        self.assertIn("No supported compiler found", output.getvalue())
 
 
 if __name__ == "__main__":

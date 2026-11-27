@@ -94,7 +94,7 @@ def process_query(
             return execute_proposal(
                 command=llm_res.command,
                 explanation=llm_res.explanation,
-                engine_name=f"Motore Locale llmasm ({backend_name})",
+                engine_name=llm_res.engine_name or f"Motore Locale llmasm ({backend_name})",
                 is_destructive=llm_res.is_destructive,
                 auto_confirm=auto_confirm,
                 dry_run=dry_run,
