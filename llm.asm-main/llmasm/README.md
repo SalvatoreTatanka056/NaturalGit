@@ -9,7 +9,7 @@
 ## 🌟 Caratteristiche Principali
 
 - **Motore di Inferenza Nativo in C (`src_c/llmasm_engine.c`)**:
-  - Implementazione completa in C99 con istruzioni SIMD **AVX2 + FMA + F16C** e fallback scalare portabile.
+  - Implementazione completa in C99 con istruzioni SIMD **AVX2 + FMA + F16C**, OpenMP e fallback scalare portabile.
   - Dequantizzazione al volo **Q8_0** (blocchi da 32 elementi, formato v1 FP32 e v2 FP16-scale).
   - Kernel matematici ultra-ottimizzati: `RMSNorm`, `RoPE` (split-half Qwen3), `SwiGLU`, `Softmax` e Grouped Query Attention (`GQA`).
   - Tokenizer BPE integrato basato su tabella hash a indirizzamento aperto con hashing di Fibonacci (zero overhead).
@@ -17,6 +17,7 @@
 - **Integrazione Python Trasparente (`ctypes`)**:
   - Nessuna dipendenza da librerie complesse o runtime pesanti.
   - Backend selezionabile (`backend="c"`, `backend="numpy"`, o `backend="auto"`).
+  - I sorgenti C sono inclusi nella distribuzione; `auto` compila in una cache utente se trova un compilatore e avvisa quando ripiega su NumPy.
   - Supporto per **generazione in streaming**, campionamento greedy o con temperatura e top-k.
 - **Fallback Pure Python / NumPy**:
   - Funziona out-of-the-box su qualsiasi macchina anche in assenza di compilatori C.
@@ -62,6 +63,8 @@ pip install -e .
 
 ### 2. Compilazione del motore C (Consigliato per massime prestazioni)
 Puoi compilare la libreria condivisa nativa (`llmasm.dll` su Windows o `libllmasm.so` su Linux) in uno dei seguenti modi:
+
+Con `backend="auto"` la compilazione è tentata automaticamente al primo uso. Su Windows è necessario MSVC Build Tools con **Desktop development with C++**, eseguendo NaturalGit da **x64 Native Tools PowerShell**; è richiesto un processore AVX2. Se il backend C è obbligatorio, usa `backend="c"`: in assenza del compilatore o della libreria riceverai un errore, non un fallback nascosto. Verifica `model.info["engine"]` per sapere quale backend è attivo.
 
 * **Tramite la CLI di llmasm (automatico):**
   ```bash

@@ -8,12 +8,21 @@ from .git_context import GitContext
 
 
 class MatchResult:
-    def __init__(self, command: str, explanation: str, is_destructive: bool = False, confidence: float = 1.0, preview: str = ""):
+    def __init__(
+        self,
+        command: str,
+        explanation: str,
+        is_destructive: bool = False,
+        confidence: float = 1.0,
+        preview: str = "",
+        engine_name: Optional[str] = None,
+    ):
         self.command = command
         self.explanation = explanation
         self.is_destructive = is_destructive
         self.confidence = confidence
         self.preview = preview
+        self.engine_name = engine_name
 
     def to_dict(self) -> Dict:
         return {

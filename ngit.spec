@@ -1,12 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
+
+native_src = os.path.join(SPECPATH, 'llm.asm-main', 'llmasm', 'src_c')
 
 a = Analysis(
     ['naturalgit/cli.py'],
-    pathex=[],
+    pathex=[SPECPATH],
     binaries=[],
-    datas=[],
-    hiddenimports=['colorama', 'requests'],
+    datas=[
+        (os.path.join(native_src, 'llmasm_engine.c'), 'llmasm/src_c'),
+        (os.path.join(native_src, 'llmasm_engine.h'), 'llmasm/src_c'),
+    ],
+    hiddenimports=['colorama', 'requests', 'llmasm'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

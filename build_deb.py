@@ -1,6 +1,6 @@
 """
 Generates standard Linux installation packages for NaturalGit:
-1. Debian/Ubuntu .deb package: dist/naturalgit_1.0.0_all.deb
+1. Debian/Ubuntu .deb package: dist/naturalgit_1.0.0_amd64.deb
 2. Universal Linux tarball: dist/naturalgit-linux.tar.gz
 
 Includes:
@@ -19,7 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DIST_DIR = BASE_DIR / "dist"
 DIST_DIR.mkdir(parents=True, exist_ok=True)
 
-DEB_FILE = DIST_DIR / "naturalgit_1.0.0_all.deb"
+DEB_FILE = DIST_DIR / "naturalgit_1.0.0_amd64.deb"
 TAR_FILE = DIST_DIR / "naturalgit-linux.tar.gz"
 
 
@@ -28,8 +28,8 @@ def create_control_tar() -> bytes:
 Version: 1.0.0
 Section: devel
 Priority: optional
-Architecture: all
-Depends: python3 (>= 3.8), python3-numpy, git
+Architecture: amd64
+Depends: python3 (>= 3.8), python3-numpy, git, libgomp1
 Maintainer: Salvatore Romano <tatanka056@gmail.com>
 Homepage: https://github.com/SalvatoreTatanka056/NaturalGit
 Description: Controllo versione Git guidato da linguaggio naturale con motore AI locale llmasm
@@ -219,7 +219,14 @@ def build_tarball():
             fpath = BASE_DIR / fname
             if fpath.exists():
                 mode = 0o755 if fname.endswith(".sh") else 0o644
-                tar.add(fpath, arcname=f"{root_name}/{fname}", filter=lambda t, m=mode: _set_mode(t, m))
+                if fname.endswith(".sh"):
+                    content = fpath.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                    ti = tar.gettarinfo(str(fpath), arcname=f"{root_name}/{fname}")
+                    ti.mode = mode
+                    ti.size = len(content)
+                    tar.addfile(ti, io.BytesIO(content))
+                else:
+                    tar.add(fpath, arcname=f"{root_name}/{fname}", filter=lambda t, m=mode: _set_mode(t, m))
 
         # Add naturalgit directory
         tar.add(

@@ -58,13 +58,13 @@ ngit config --provider <nome_provider>
 ```
 
 ### A. Provider Locale: `local` / `llmasm` (100% Offline)
-Usa il motore di inferenza nativo **`llmasm`** scritto in **C con vettorizzazione AVX2 + FMA** (basato su `llm.asm`) che esegue file di modello compatti `.asmbin`. Non richiede connessione Internet, non invia dati all'esterno ed è velocissimo.
+Usa il motore locale **`llmasm`** per file `.asmbin`. Il backend C nativo usa AVX2/FMA e OpenMP; il backend NumPy è il fallback portabile. L'inferenza resta offline e non invia dati all'esterno.
 
 ```bash
 # 1. Imposta il percorso del modello .asmbin (attiva automaticamente il provider 'local'):
 ngit config --local-model "C:\percorso\al\tuo\modello.asmbin"
 
-# 2. Scegli il backend (c per C/DLL ad alte prestazioni, numpy per fallback):
+# 2. Scegli il backend (auto prova C e indica il fallback, c lo rende obbligatorio):
 ngit config --local-backend c
 
 # 3. Imposta i thread CPU da usare:
@@ -76,6 +76,8 @@ ngit config --local-max-tokens 150
 
 > [!TIP]
 > Una volta configurato `--local-model`, NaturalGit ricorderà questa scelta e userà sempre il modello locale anche se lanci semplicemente `ngit "frase"`. Se invece vuoi usarlo solo per un singolo comando, usa il flag `-l`: `ngit -l "frase"`.
+
+Il pacchetto include i sorgenti C e prova a compilare la libreria al primo avvio, salvando il binario nella cache utente. Su Windows serve MSVC Build Tools con il workload **Desktop development with C++**; avvia NaturalGit da **x64 Native Tools PowerShell** così `cl.exe` è disponibile. È richiesto un processore x86-64 con AVX2 per il percorso SIMD. L'output mostra il backend effettivamente caricato: `auto` usa NumPy se non riesce a compilare o caricare C, mentre `c` segnala un errore esplicito invece di ripiegare silenziosamente.
 
 ---
 

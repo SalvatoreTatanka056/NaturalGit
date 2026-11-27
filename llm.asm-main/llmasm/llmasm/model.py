@@ -614,6 +614,7 @@ class AsmBinModel:
         """Returns model architecture information."""
         return {
             "path": self.path,
+            "engine": "NumPy CPU",
             "version": self.version,
             "scale_format": "fp16" if self.fp16_scales else "fp32",
             "dim": self.dim,

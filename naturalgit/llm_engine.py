@@ -241,8 +241,8 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
         print_info(f"Elaborazione con motore locale llmasm in corso (thread: {threads})...")
 
         model = load_model(model_path, backend=backend, threads=threads)
-        if hasattr(model, "set_threads"):
-            model.set_threads(threads)
+        engine_name = model.info.get("engine", "NumPy CPU")
+        print_info(f"Backend locale effettivo: {engine_name}")
         formatted_prompt = (
             "Sei un assistente Git. Traduci SEMPRE la richiesta dell'utente in un comando Git valido.\n"
             'Esempio: "elenca file" -> {"command": "git ls-files", "explanation": "Elenca file tracciati"}\n'
@@ -301,7 +301,8 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
                 command=cmd,
                 explanation=exp,
                 is_destructive=is_destructive,
-                confidence=0.92
+                confidence=0.92,
+                engine_name=f"Motore Locale llmasm ({engine_name})",
             )
         
         # Regex fallback for any git command
@@ -313,7 +314,8 @@ def query_llmasm(prompt: str, ctx_data: Dict[str, Any], config: Dict[str, Any]) 
                 command=cmd,
                 explanation="Comando generato dal motore locale llmasm",
                 is_destructive=any(k in cmd for k in destructive_keywords),
-                confidence=0.85
+                confidence=0.85,
+                engine_name=f"Motore Locale llmasm ({engine_name})",
             )
     except Exception as e:
         from .ui import print_warning

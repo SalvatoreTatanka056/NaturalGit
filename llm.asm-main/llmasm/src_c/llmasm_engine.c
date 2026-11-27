@@ -16,7 +16,7 @@
 #include <math.h>
 
 #if defined(__x86_64__) || defined(_M_X64)
-    #if defined(__AVX2__)
+    #if defined(__AVX2__) || defined(_M_AVX2)
         #include <immintrin.h>
         #define HAS_AVX2 1
     #endif

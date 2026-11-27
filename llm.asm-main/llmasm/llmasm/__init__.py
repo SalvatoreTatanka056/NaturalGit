@@ -7,8 +7,9 @@ llmasm - Python library & C runtime for llm.asm models (.asmbin format)
 - Safetensors / HuggingFace to .asmbin Exporter & Quantizer
 """
 
-from typing import Optional, Union
+import warnings
 from pathlib import Path
+from typing import Optional, Union
 
 from .tokenizer import AsmTokenizer
 from .converter import export_to_asmbin
@@ -49,8 +50,16 @@ def load_model(
     if backend in ("c", "auto"):
         try:
             return CAsmBinModel(model_path_str, lib_path=lib_path, threads=threads)
-        except Exception:
-            # If C engine is not yet compiled, gracefully fallback to NumPy
-            pass
+        except Exception as exc:
+            if backend == "c":
+                raise RuntimeError(
+                    f"Native C backend requested but unavailable ({exc}). Install a supported C compiler "
+                    "(MSVC Build Tools on Windows, or GCC/Clang) and retry, or select backend='numpy'."
+                ) from exc
+            warnings.warn(
+                f"Native C backend unavailable; using NumPy instead ({exc})",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     return AsmBinModel(model_path_str, threads=threads)
